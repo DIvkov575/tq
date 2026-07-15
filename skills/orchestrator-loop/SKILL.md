@@ -14,19 +14,46 @@ workspace full of live agent sessions (terminals in panes/surfaces).
 Each time this runs (typically on a `/loop` cron cadence):
 
 1. **Check expqueue**: `expqueue list --json`. Any `queued` items are new
-   work someone added since last cycle. For a task with a `project`
-   assignment, prefer `expqueue project panes <project>` to find that
-   project's own workspace/panes first (see "Allocating a task to a
-   project" below) rather than scanning the whole fleet. Once a target
-   session is picked (see step 3), deliver the task via `c11 send` +
-   `c11 send-key enter` and tell that session to `expqueue pop --project
-   <name>` (or plain `expqueue pop` for unassigned tasks) / `done` it.
+   work someone added since last cycle.
 
-2. **Poll the c11 workplace workspace**: `c11 tree --workspace <ref> --no-layout --report`
+2. **Triage unassigned tasks.** For every `queued` task with `project:
+   null`, read its title/notes and judge against `expqueue project list
+   --json`:
+   - **Matches an existing project** (the task clearly relates to a
+     project you already know about — by name, by directory, by subject
+     matter) → `expqueue edit <id> --project <name>`. Leave it `queued`;
+     delivery is implicit — whichever session in that project's workspace
+     next runs `expqueue pop --project <name>` will pick it up. Do not
+     `c11 send` into a pane for this case.
+   - **Explicitly needs a brand-new project** — the task's own text says
+     so in plain language (e.g. "new repo for this", "remote project",
+     "spin up a fresh project for X"). Only create a new project when the
+     task itself asks for one; a task merely lacking a project match is
+     NOT enough justification — see the ambiguous case below.
+     1. Pick a project name and local directory (default
+        `~/workplace/<name>`).
+     2. `expqueue project add <name> <dir> --init-dir` — add `--repo
+        <owner/name> --create-repo` only if the task text implies
+        GitHub-backed (e.g. says "remote project"); otherwise local-only.
+     3. `expqueue edit <id> --project <name>`.
+     4. Spawn a fresh agent: `c11 new-workspace --cwd <dir>`, then launch
+        `claude --dangerously-skip-permissions "<task title + notes as the
+        prompt>"` as a one-shot argv launch (see the c11 skill's
+        "Preferred — one-shot prompt via claude argv" pattern — no
+        ready-state race, no polling). The new session receives the task
+        as its initial prompt, so it owns the work immediately; do not
+        also leave the task queued for a `pop`.
+     5. Name the new workspace/tab per the c11 orchestration skill's
+        tab-naming convention before or immediately after launch.
+   - **Ambiguous** — you cannot confidently place it in either bucket
+     above → leave it `queued` and unassigned, and escalate to the user
+     (see step 5) rather than guess. Do not create a project speculatively.
+
+3. **Poll the c11 workplace workspace**: `c11 tree --workspace <ref> --no-layout --report`
    to enumerate panes/surfaces, then `c11 read-screen --surface <ref>` on each
    active `claude-code`/`codex` surface to see its tail output.
 
-3. **Classify each surface's state** and act:
+4. **Classify each surface's state** and act:
    - **Actively running** (mid tool-call, spinner, no prompt showing) — leave alone.
    - **Waiting on a simple/mechanical continuation** ("want me to proceed?",
      "should I start X?", straightforward yes/no with an obvious answer) —
@@ -44,8 +71,9 @@ Each time this runs (typically on a `/loop` cron cadence):
      unclear intent) — do not decide for the user. Summarize the decision
      and ping them.
 
-4. **Report back tersely**: what's newly queued, what you drove, what you
-   escalated. Don't re-list surfaces that are unchanged and still running.
+5. **Report back tersely**: what's newly queued, what you triaged (routed
+   or created), what you drove, what you escalated. Don't re-list surfaces
+   that are unchanged and still running.
 
 ## Why "never leave it idle" matters
 
@@ -70,7 +98,7 @@ tagged with a derived `activity` (`working` / `idle` / `unknown`). It only
 2. Among the returned surfaces, `activity: "idle"` is a candidate but not
    proof — always confirm with `c11 read-screen --workspace <ref> --surface
    <ref>` before delivering a task, the same way you'd verify any surface's
-   state in step 3 of the main cycle. `activity: "working"` means leave it
+   state in step 4 of the main cycle. `activity: "working"` means leave it
    alone; `"unknown"` means c11 has no signal (e.g. a non-claude-code TUI
    that hasn't self-reported) — read its screen rather than trusting the tag.
 3. Deliver the task into the chosen surface, then have that session run
@@ -80,7 +108,7 @@ tagged with a derived `activity` (`working` / `idle` / `unknown`). It only
 This only finds panes that follow c11's own "one workspace per project"
 convention — a project sharing a workspace with unrelated repos (e.g. several
 throwaway shells multiplexed into one "scratch" workspace) won't be found
-this way; fall back to the fleet-wide `c11 tree --all` scan in step 2 of the
+this way; fall back to the fleet-wide `c11 tree --all` scan in step 3 of the
 main cycle for those.
 
 ## Useful commands
@@ -91,6 +119,7 @@ expqueue push "<title>" [--notes "..."] [--project demo]
 expqueue pop [--project demo] --json     # FIFO pop, marks in_progress
 expqueue done <id> / drop <id>
 expqueue project panes demo --json       # discover demo's live c11 panes
+expqueue project add <name> <dir> --init-dir [--repo <owner/name> --create-repo]
 
 c11 tree --workspace <ref> --no-layout --report
 c11 read-screen --surface <ref>

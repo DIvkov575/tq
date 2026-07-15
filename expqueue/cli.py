@@ -9,7 +9,7 @@ Usage:
   expqueue start <id>
   expqueue rm <id>
   expqueue edit <id> [--title "<title>"] [--notes "<notes>"] [--project NAME]
-  expqueue project add <name> <directory> [--repo <owner/name>] [--create-repo]
+  expqueue project add <name> <directory> [--repo <owner/name>] [--create-repo] [--init-dir]
   expqueue project list [--json]
   expqueue project panes <name> [--json]
 """
@@ -102,8 +102,8 @@ def cmd_project_add(args: argparse.Namespace) -> None:
         if created:
             print(f"created gh repo {args.repo}")
     try:
-        project = pstore.add(args.name, args.directory, repo=args.repo)
-    except ValueError as exc:
+        project = pstore.add(args.name, args.directory, repo=args.repo, init_dir=args.init_dir)
+    except (ValueError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
     print(f"[{project.name}] dir={project.directory} repo={project.repo or '-'}")
@@ -201,6 +201,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--create-repo",
         action="store_true",
         help="create the GitHub repo via `gh` if it doesn't exist",
+    )
+    p_project_add.add_argument(
+        "--init-dir",
+        action="store_true",
+        help="create the local directory (and run `git init`) if it doesn't exist yet",
     )
     p_project_add.set_defaults(func=lambda store, args: cmd_project_add(args))
 

@@ -85,8 +85,18 @@ class ProjectStore:
                 return p
         return None
 
-    def add(self, name: str, directory: str, repo: str | None = None) -> Project:
-        project = Project(name=name, directory=str(Path(directory).expanduser()), repo=repo)
+    def add(
+        self, name: str, directory: str, repo: str | None = None, init_dir: bool = False
+    ) -> Project:
+        if self.get(name) is not None:
+            raise ValueError(f"project already exists: {name}")
+        resolved = Path(directory).expanduser()
+        if init_dir and not resolved.exists():
+            resolved.mkdir(parents=True)
+            result = subprocess.run(["git", "init", str(resolved)], capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"git init failed: {result.stderr.strip()}")
+        project = Project(name=name, directory=str(resolved), repo=repo)
         with self._locked():
             items = self._read_raw()
             if any(d["name"] == name for d in items):

@@ -73,3 +73,43 @@ def test_project_store_duplicate_name_raises(project_store: ProjectStore) -> Non
     project_store.add("demo", "/tmp/demo")
     with pytest.raises(ValueError):
         project_store.add("demo", "/tmp/other")
+
+
+def test_project_store_duplicate_name_with_init_dir_does_not_create_directory(
+    tmp_path: Path,
+) -> None:
+    project_store = ProjectStore(path=tmp_path / "projects.json")
+    project_store.add("demo", str(tmp_path / "existing"))
+    orphan = tmp_path / "orphan"
+    with pytest.raises(ValueError):
+        project_store.add("demo", str(orphan), init_dir=True)
+    assert not orphan.exists()
+
+
+def test_project_store_init_dir_creates_missing_directory(tmp_path: Path) -> None:
+    project_store = ProjectStore(path=tmp_path / "projects.json")
+    target = tmp_path / "new-project"
+    assert not target.exists()
+    project = project_store.add("demo", str(target), init_dir=True)
+    assert target.is_dir()
+    assert (target / ".git").is_dir()
+    assert project.directory == str(target)
+
+
+def test_project_store_init_dir_leaves_existing_directory_alone(tmp_path: Path) -> None:
+    project_store = ProjectStore(path=tmp_path / "projects.json")
+    target = tmp_path / "already-here"
+    target.mkdir()
+    marker = target / "marker.txt"
+    marker.write_text("keep me")
+    project_store.add("demo", str(target), init_dir=True)
+    assert marker.read_text() == "keep me"
+    assert not (target / ".git").exists()
+
+
+def test_project_store_add_without_init_dir_does_not_create_directory(tmp_path: Path) -> None:
+    project_store = ProjectStore(path=tmp_path / "projects.json")
+    target = tmp_path / "never-created"
+    project = project_store.add("demo", str(target))
+    assert not target.exists()
+    assert project.directory == str(target)
