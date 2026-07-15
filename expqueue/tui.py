@@ -21,6 +21,7 @@ from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
+from rich.text import Text
 
 from expqueue.projects import ProjectStore
 from expqueue.store import QueueStore, STATUSES, Task
@@ -33,6 +34,21 @@ STATUS_ICON = {
 }
 
 FILTER_CYCLE = [None, *STATUSES]
+
+# Visual grouping order: active work first, then queued, then finished.
+# "done" and "dropped" share one "completed" section since both are terminal.
+SECTION_ORDER = ["in_progress", "queued", "completed"]
+SECTION_LABEL = {
+    "in_progress": "RUNNING",
+    "queued": "QUEUED",
+    "completed": "COMPLETED",
+}
+
+
+def _section_of(status: str) -> str:
+    if status in ("done", "dropped"):
+        return "completed"
+    return status
 
 
 class InputModal(ModalScreen[str | None]):
@@ -107,6 +123,7 @@ class ExpQueueApp(App):
         self.store = QueueStore()
         self.project_store = ProjectStore()
         self._rows: list[Task] = []
+        self._header_keys: set[str] = set()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -124,19 +141,35 @@ class ExpQueueApp(App):
         table.clear(columns=True)
         table.add_columns("", "id", "title", "notes", "status", "project")
         self._rows = self.store.list(status=self.filter_status)
+
+        grouped: dict[str, list[Task]] = {name: [] for name in SECTION_ORDER}
         for t in self._rows:
-            table.add_row(
-                STATUS_ICON.get(t.status, "?"),
-                t.id,
-                t.title,
-                t.notes,
-                t.status,
-                t.project or "",
-                key=t.id,
-            )
+            grouped[_section_of(t.status)].append(t)
+
+        self._header_keys: set[str] = set()
+        for section in SECTION_ORDER:
+            tasks = grouped[section]
+            if not tasks:
+                continue
+            header_key = f"__section_{section}__"
+            self._header_keys.add(header_key)
+            label = Text(f"── {SECTION_LABEL[section]} ({len(tasks)}) ──", style="bold dim")
+            table.add_row("", "", label, "", "", "", key=header_key)
+            for t in tasks:
+                table.add_row(
+                    STATUS_ICON.get(t.status, "?"),
+                    t.id,
+                    t.title,
+                    t.notes,
+                    t.status,
+                    t.project or "",
+                    key=t.id,
+                )
+
         if selected_id:
-            for row_index, t in enumerate(self._rows):
-                if t.id == selected_id:
+            for row_index in range(table.row_count):
+                row_key = table.coordinate_to_cell_key((row_index, 0))[0]
+                if row_key.value == selected_id:
                     table.move_cursor(row=row_index)
                     break
 
@@ -146,9 +179,12 @@ class ExpQueueApp(App):
             return None
         try:
             row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
-            return row_key.value
+            value = row_key.value
         except Exception:
             return None
+        if value in getattr(self, "_header_keys", set()):
+            return None
+        return value
 
     def watch_filter_status(self, value: str | None) -> None:
         bar = self.query_one("#status-bar", Static)
