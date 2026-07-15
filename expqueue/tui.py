@@ -7,6 +7,7 @@ Keybindings:
   x         drop selected task
   s         mark selected task in_progress ("start")
   r         requeue selected task (back to queued)
+  p         assign selected task to a project
   D         delete selected task
   /         filter by status (cycles: all -> queued -> in_progress -> done -> dropped)
   q         quit
@@ -21,6 +22,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 
+from expqueue.projects import ProjectStore
 from expqueue.store import QueueStore, STATUSES, Task
 
 STATUS_ICON = {
@@ -92,6 +94,7 @@ class ExpQueueApp(App):
         Binding("x", "mark_dropped", "Drop"),
         Binding("s", "mark_started", "Start"),
         Binding("r", "requeue", "Requeue"),
+        Binding("p", "assign_project", "Project"),
         Binding("D", "delete_task", "Delete", key_display="shift+d"),
         Binding("/", "cycle_filter", "Filter"),
         Binding("q", "quit", "Quit"),
@@ -102,6 +105,7 @@ class ExpQueueApp(App):
     def __init__(self):
         super().__init__()
         self.store = QueueStore()
+        self.project_store = ProjectStore()
         self._rows: list[Task] = []
 
     def compose(self) -> ComposeResult:
@@ -118,7 +122,7 @@ class ExpQueueApp(App):
         table = self.query_one(DataTable)
         selected_id = self._selected_id()
         table.clear(columns=True)
-        table.add_columns("", "id", "title", "notes", "status")
+        table.add_columns("", "id", "title", "notes", "status", "project")
         self._rows = self.store.list(status=self.filter_status)
         for t in self._rows:
             table.add_row(
@@ -127,6 +131,7 @@ class ExpQueueApp(App):
                 t.title,
                 t.notes,
                 t.status,
+                t.project or "",
                 key=t.id,
             )
         if selected_id:
@@ -202,6 +207,26 @@ class ExpQueueApp(App):
         if task_id:
             self.store.update_status(task_id, "queued")
             self.refresh_table()
+
+    def action_assign_project(self) -> None:
+        task_id = self._selected_id()
+        if not task_id:
+            return
+        current = next((t for t in self._rows if t.id == task_id), None)
+        if not current:
+            return
+        names = [p.name for p in self.project_store.list()]
+        hint = f" (known: {', '.join(names)})" if names else ""
+
+        def _on_project(name: str | None) -> None:
+            if name is None:
+                return
+            self.store.edit(task_id, project=name)
+            self.refresh_table()
+
+        self.push_screen(
+            InputModal(f"Project name{hint}:", initial=current.project or ""), _on_project
+        )
 
     def action_delete_task(self) -> None:
         task_id = self._selected_id()

@@ -28,6 +28,7 @@ class Task:
     title: str
     notes: str = ""
     status: str = "queued"
+    project: str | None = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -41,6 +42,7 @@ class Task:
             title=d["title"],
             notes=d.get("notes", ""),
             status=d.get("status", "queued"),
+            project=d.get("project"),
             created_at=d.get("created_at", time.time()),
             updated_at=d.get("updated_at", time.time()),
         )
@@ -86,8 +88,8 @@ class QueueStore:
             items = [t for t in items if t.status == status]
         return items
 
-    def push(self, title: str, notes: str = "") -> Task:
-        task = Task(id=uuid.uuid4().hex[:8], title=title, notes=notes)
+    def push(self, title: str, notes: str = "", project: str | None = None) -> Task:
+        task = Task(id=uuid.uuid4().hex[:8], title=title, notes=notes, project=project)
         with self._locked():
             items = self._read_raw()
             items.append(task.to_dict())
@@ -128,7 +130,13 @@ class QueueStore:
                 self._write_raw(new_items)
         return changed
 
-    def edit(self, task_id: str, title: str | None = None, notes: str | None = None) -> Task | None:
+    def edit(
+        self,
+        task_id: str,
+        title: str | None = None,
+        notes: str | None = None,
+        project: str | None = None,
+    ) -> Task | None:
         with self._locked():
             items = self._read_raw()
             for d in items:
@@ -137,6 +145,8 @@ class QueueStore:
                         d["title"] = title
                     if notes is not None:
                         d["notes"] = notes
+                    if project is not None:
+                        d["project"] = project or None
                     d["updated_at"] = time.time()
                     self._write_raw(items)
                     return Task.from_dict(d)
