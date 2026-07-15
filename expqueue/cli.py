@@ -3,7 +3,7 @@
 Usage:
   expqueue list [--status queued|in_progress|done|dropped] [--project NAME] [--json]
   expqueue push "<title>" [--notes "<notes>"] [--project NAME]
-  expqueue pop [--json]
+  expqueue pop [--project NAME] [--json]
   expqueue done <id>
   expqueue drop <id>
   expqueue start <id>
@@ -11,6 +11,7 @@ Usage:
   expqueue edit <id> [--title "<title>"] [--notes "<notes>"] [--project NAME]
   expqueue project add <name> <directory> [--repo <owner/name>] [--create-repo]
   expqueue project list [--json]
+  expqueue project panes <name> [--json]
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import argparse
 import json
 import sys
 
+from expqueue.panes import C11Unavailable, list_project_workspaces
 from expqueue.projects import ProjectStore, ensure_gh_repo
 from expqueue.store import QueueStore, STATUSES, Task
 
@@ -50,7 +52,7 @@ def cmd_push(store: QueueStore, args: argparse.Namespace) -> None:
 
 
 def cmd_pop(store: QueueStore, args: argparse.Namespace) -> None:
-    task = store.pop()
+    task = store.pop(project=args.project)
     if task is None:
         if args.json:
             print("null")
@@ -120,6 +122,30 @@ def cmd_project_list(args: argparse.Namespace) -> None:
         print(f"[{p.name}] dir={p.directory} repo={p.repo or '-'}")
 
 
+def cmd_project_panes(args: argparse.Namespace) -> None:
+    pstore = ProjectStore()
+    project = pstore.get(args.name)
+    if project is None:
+        print(f"no project named {args.name}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        workspaces = list_project_workspaces(project.directory)
+    except C11Unavailable as exc:
+        print(f"c11 unavailable: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if args.json:
+        print(json.dumps([w.to_dict() for w in workspaces], indent=2))
+        return
+    if not workspaces:
+        print(f"(no c11 panes found under {project.directory})")
+        return
+    for w in workspaces:
+        print(f"[{w.workspace_ref}] {w.title} — {w.directory}")
+        for s in w.surfaces:
+            activity = s.activity or "unknown"
+            print(f"    {s.ref} ({activity}) {s.title}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="expqueue")
     sub = p.add_subparsers(dest="command", required=True)
@@ -137,6 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_push.set_defaults(func=cmd_push)
 
     p_pop = sub.add_parser("pop", help="pop the oldest queued task (marks in_progress)")
+    p_pop.add_argument("--project", default=None, help="only pop a task assigned to this project")
     p_pop.add_argument("--json", action="store_true")
     p_pop.set_defaults(func=cmd_pop)
 
@@ -180,6 +207,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_list = project_sub.add_parser("list", help="list registered projects")
     p_project_list.add_argument("--json", action="store_true")
     p_project_list.set_defaults(func=lambda store, args: cmd_project_list(args))
+
+    p_project_panes = project_sub.add_parser(
+        "panes", help="list c11 workspaces/panes whose cwd is under a project's directory"
+    )
+    p_project_panes.add_argument("name")
+    p_project_panes.add_argument("--json", action="store_true")
+    p_project_panes.set_defaults(func=lambda store, args: cmd_project_panes(args))
 
     return p
 

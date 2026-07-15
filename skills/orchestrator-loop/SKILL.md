@@ -14,9 +14,13 @@ workspace full of live agent sessions (terminals in panes/surfaces).
 Each time this runs (typically on a `/loop` cron cadence):
 
 1. **Check expqueue**: `expqueue list --json`. Any `queued` items are new
-   work someone added since last cycle — decide which idle/finished session
-   should pick each one up (see step 3), then deliver it via `c11 send` +
-   `c11 send-key enter` and tell that session to `expqueue pop`/`done` it.
+   work someone added since last cycle. For a task with a `project`
+   assignment, prefer `expqueue project panes <project>` to find that
+   project's own workspace/panes first (see "Allocating a task to a
+   project" below) rather than scanning the whole fleet. Once a target
+   session is picked (see step 3), deliver the task via `c11 send` +
+   `c11 send-key enter` and tell that session to `expqueue pop --project
+   <name>` (or plain `expqueue pop` for unassigned tasks) / `done` it.
 
 2. **Poll the c11 workplace workspace**: `c11 tree --workspace <ref> --no-layout --report`
    to enumerate panes/surfaces, then `c11 read-screen --surface <ref>` on each
@@ -52,13 +56,41 @@ feeding it new work or asking what's next. Treat every finished session as
 requiring one of: new task, or an explicit question to the user — every cycle,
 not just the first time it goes idle.
 
+## Allocating a task to a project
+
+`expqueue project panes <name>` finds c11 workspaces whose cwd matches the
+project's registered directory and lists every surface (tab) in each,
+tagged with a derived `activity` (`working` / `idle` / `unknown`). It only
+*discovers* candidates — it does not pick one for you:
+
+1. Run `expqueue project panes <name> --json`. If it returns no workspaces,
+   the project has no live pane right now — either spawn one (`c11
+   new-workspace --cwd <project directory>` + launch an agent per the c11
+   orchestration skill) or ask the user.
+2. Among the returned surfaces, `activity: "idle"` is a candidate but not
+   proof — always confirm with `c11 read-screen --workspace <ref> --surface
+   <ref>` before delivering a task, the same way you'd verify any surface's
+   state in step 3 of the main cycle. `activity: "working"` means leave it
+   alone; `"unknown"` means c11 has no signal (e.g. a non-claude-code TUI
+   that hasn't self-reported) — read its screen rather than trusting the tag.
+3. Deliver the task into the chosen surface, then have that session run
+   `expqueue pop --project <name>` so it only pulls work assigned to this
+   project even if the shared queue has other projects' tasks queued too.
+
+This only finds panes that follow c11's own "one workspace per project"
+convention — a project sharing a workspace with unrelated repos (e.g. several
+throwaway shells multiplexed into one "scratch" workspace) won't be found
+this way; fall back to the fleet-wide `c11 tree --all` scan in step 2 of the
+main cycle for those.
+
 ## Useful commands
 
 ```
-expqueue list --json          # current queue state
-expqueue push "<title>" [--notes "..."]
-expqueue pop --json           # FIFO pop, marks in_progress
+expqueue list --json                     # current queue state
+expqueue push "<title>" [--notes "..."] [--project demo]
+expqueue pop [--project demo] --json     # FIFO pop, marks in_progress
 expqueue done <id> / drop <id>
+expqueue project panes demo --json       # discover demo's live c11 panes
 
 c11 tree --workspace <ref> --no-layout --report
 c11 read-screen --surface <ref>

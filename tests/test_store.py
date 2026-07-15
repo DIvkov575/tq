@@ -35,6 +35,21 @@ def test_edit_project(store: QueueStore) -> None:
     assert updated.project == "demo"
 
 
+def test_pop_scoped_to_project(store: QueueStore) -> None:
+    store.push("general task")
+    demo_task = store.push("demo task", project="demo")
+    popped = store.pop(project="demo")
+    assert popped.id == demo_task.id
+    assert popped.status == "in_progress"
+    # the general task is untouched and still queued
+    assert store.list(status="queued")[0].title == "general task"
+
+
+def test_pop_scoped_to_project_returns_none_when_empty(store: QueueStore) -> None:
+    store.push("general task")
+    assert store.pop(project="demo") is None
+
+
 def test_list_filters_by_status(store: QueueStore) -> None:
     store.push("a")
     t2 = store.push("b")

@@ -96,16 +96,22 @@ class QueueStore:
             self._write_raw(items)
         return task
 
-    def pop(self) -> Task | None:
-        """Pop the oldest queued task (FIFO) and mark it in_progress."""
+    def pop(self, project: str | None = None) -> Task | None:
+        """Pop the oldest queued task (FIFO) and mark it in_progress.
+
+        If `project` is given, only considers tasks assigned to that project.
+        """
         with self._locked():
             items = self._read_raw()
             for d in items:
-                if d.get("status") == "queued":
-                    d["status"] = "in_progress"
-                    d["updated_at"] = time.time()
-                    self._write_raw(items)
-                    return Task.from_dict(d)
+                if d.get("status") != "queued":
+                    continue
+                if project is not None and d.get("project") != project:
+                    continue
+                d["status"] = "in_progress"
+                d["updated_at"] = time.time()
+                self._write_raw(items)
+                return Task.from_dict(d)
         return None
 
     def update_status(self, task_id: str, status: str) -> Task | None:
