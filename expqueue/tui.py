@@ -1,8 +1,10 @@
 """Textual TUI for the experiment queue.
 
-A single view: tasks grouped into RUNNING / QUEUED / COMPLETED sections.
+Two views, switchable with 1/2 or Tab:
+  1  Queue view    - tasks grouped into RUNNING / QUEUED / COMPLETED sections
+  2  Projects view - registered projects: name, directory, repo
 
-Keybindings:
+Queue view keybindings:
   a         add a new task
   e         edit selected task's title
   d         mark selected task done
@@ -13,6 +15,10 @@ Keybindings:
             unset to keep it in the general/unassigned queue)
   D         delete selected task
   /         filter by status (cycles: all -> queued -> in_progress -> done -> dropped)
+
+Global:
+  1 / 2     jump to Queue / Projects view
+  Tab       cycle to the next view
   q         quit
 """
 
@@ -49,6 +55,9 @@ SECTION_LABEL = {
 }
 
 UNASSIGNED = "(unassigned)"
+
+VIEWS = ["queue", "projects"]
+VIEW_LABEL = {"queue": "Queue", "projects": "Projects"}
 
 
 def _section_of(status: str) -> str:
@@ -101,6 +110,12 @@ class ExpQueueApp(App):
     Screen {
         layout: vertical;
     }
+    #view-bar {
+        height: 1;
+        background: $panel;
+        color: $text-muted;
+        padding: 0 1;
+    }
     #status-bar {
         height: 1;
         background: $panel;
@@ -110,6 +125,9 @@ class ExpQueueApp(App):
     """
 
     BINDINGS = [
+        Binding("1", "goto_queue", "Queue"),
+        Binding("2", "goto_projects", "Projects"),
+        Binding("tab", "cycle_view", "Next view", priority=True),
         Binding("a", "add_task", "Add"),
         Binding("e", "edit_task", "Edit"),
         Binding("d", "mark_done", "Done"),
@@ -123,6 +141,7 @@ class ExpQueueApp(App):
     ]
 
     filter_status: reactive[str | None] = reactive(None, init=False)
+    active_view: reactive[str] = reactive("queue", init=False)
 
     def __init__(self):
         super().__init__()
@@ -134,14 +153,62 @@ class ExpQueueApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static(self._view_bar_text(), id="view-bar")
         yield Static("filter: all", id="status-bar")
         yield DataTable(id="queue-table", cursor_type="row", zebra_stripes=True)
+        yield DataTable(id="projects-table", cursor_type="row", zebra_stripes=True)
         yield Footer()
 
     def on_mount(self) -> None:
-        self.set_focus(self.query_one("#queue-table", DataTable))
+        self._apply_view_visibility()
+        self.refresh_all()
+        self.set_interval(2.0, self.refresh_all)
+
+    def refresh_all(self) -> None:
         self.refresh_table()
-        self.set_interval(2.0, self.refresh_table)
+        self.refresh_projects_view()
+
+    # -- view switching ---------------------------------------------------
+
+    def _view_bar_text(self) -> str:
+        parts = []
+        for i, v in enumerate(VIEWS, start=1):
+            label = f"[{i}] {VIEW_LABEL[v]}"
+            if v == self.active_view:
+                label = f"*{label}*"
+            parts.append(label)
+        return "  ".join(parts)
+
+    def _apply_view_visibility(self) -> None:
+        queue_table = self.query_one("#queue-table", DataTable)
+        projects_table = self.query_one("#projects-table", DataTable)
+        status_bar = self.query_one("#status-bar", Static)
+
+        queue_table.display = self.active_view == "queue"
+        status_bar.display = self.active_view == "queue"
+        projects_table.display = self.active_view == "projects"
+
+        bar = self.query_one("#view-bar", Static)
+        bar.update(self._view_bar_text())
+
+        if self.active_view == "queue":
+            self.set_focus(queue_table)
+        elif self.active_view == "projects":
+            self.set_focus(projects_table)
+
+    def watch_active_view(self, value: str) -> None:
+        self._apply_view_visibility()
+        self.refresh_all()
+
+    def action_goto_queue(self) -> None:
+        self.active_view = "queue"
+
+    def action_goto_projects(self) -> None:
+        self.active_view = "projects"
+
+    def action_cycle_view(self) -> None:
+        idx = VIEWS.index(self.active_view)
+        self.active_view = VIEWS[(idx + 1) % len(VIEWS)]
 
     # -- queue view -----------------------------------------------------
 
@@ -202,10 +269,15 @@ class ExpQueueApp(App):
         self.refresh_table()
 
     def action_cycle_filter(self) -> None:
+        if self.active_view != "queue":
+            return
         idx = FILTER_CYCLE.index(self.filter_status)
         self.filter_status = FILTER_CYCLE[(idx + 1) % len(FILTER_CYCLE)]
 
     def action_add_task(self) -> None:
+        if self.active_view != "queue":
+            return
+
         def _on_title(title: str | None) -> None:
             if not title:
                 return
@@ -215,6 +287,8 @@ class ExpQueueApp(App):
         self.push_screen(InputModal("New task title:"), _on_title)
 
     def action_edit_task(self) -> None:
+        if self.active_view != "queue":
+            return
         task_id = self._selected_id()
         if not task_id:
             return
@@ -231,30 +305,40 @@ class ExpQueueApp(App):
         self.push_screen(InputModal("Edit title:", initial=current.title), _on_title)
 
     def action_mark_done(self) -> None:
+        if self.active_view != "queue":
+            return
         task_id = self._selected_id()
         if task_id:
             self.store.update_status(task_id, "done")
             self.refresh_table()
 
     def action_mark_dropped(self) -> None:
+        if self.active_view != "queue":
+            return
         task_id = self._selected_id()
         if task_id:
             self.store.update_status(task_id, "dropped")
             self.refresh_table()
 
     def action_mark_started(self) -> None:
+        if self.active_view != "queue":
+            return
         task_id = self._selected_id()
         if task_id:
             self.store.update_status(task_id, "in_progress")
             self.refresh_table()
 
     def action_requeue(self) -> None:
+        if self.active_view != "queue":
+            return
         task_id = self._selected_id()
         if task_id:
             self.store.update_status(task_id, "queued")
             self.refresh_table()
 
     def action_assign_project(self) -> None:
+        if self.active_view != "queue":
+            return
         task_id = self._selected_id()
         if not task_id:
             return
@@ -275,10 +359,36 @@ class ExpQueueApp(App):
         )
 
     def action_delete_task(self) -> None:
+        if self.active_view != "queue":
+            return
         task_id = self._selected_id()
         if task_id:
             self.store.remove(task_id)
             self.refresh_table()
+
+    # -- projects view ----------------------------------------------------
+
+    def refresh_projects_view(self) -> None:
+        table = self.query_one("#projects-table", DataTable)
+        selected_key = None
+        if table.row_count and table.cursor_coordinate is not None:
+            try:
+                row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+                selected_key = row_key.value
+            except Exception:
+                selected_key = None
+
+        table.clear(columns=True)
+        table.add_columns("name", "directory", "repo")
+        for p in self.project_store.list():
+            table.add_row(p.name, p.directory, p.repo or "", key=p.name)
+
+        if selected_key:
+            for row_index in range(table.row_count):
+                row_key = table.coordinate_to_cell_key((row_index, 0))[0]
+                if row_key.value == selected_key:
+                    table.move_cursor(row=row_index)
+                    break
 
 
 def main() -> None:

@@ -18,9 +18,14 @@ uv sync
 uv run expqueue-tui
 ```
 
-A single view: tasks grouped into visual sections (RUNNING / QUEUED / COMPLETED), each row showing an icon + text status and a project column. Tasks with no project sit in the general/unassigned queue (shown as `(unassigned)`) — this is also the orchestrator's triage signal: an unassigned queued task is one it hasn't routed to a project yet. Auto-refreshes every 2s so it picks up changes made by an agent via the CLI.
+Two views, switchable with `1`/`2` or `Tab`:
 
-Keys: `a` add, `e` edit title, `s` start, `d` done, `x` drop, `r` requeue, `p` assign to an existing project (blank clears it back to unassigned), `D` delete, `/` cycle status filter, `q` quit.
+- **Queue** (default): tasks grouped into visual sections (RUNNING / QUEUED / COMPLETED), each row showing an icon + text status and a project column. Tasks with no project sit in the general/unassigned queue (shown as `(unassigned)`) — this is also the orchestrator's triage signal: an unassigned queued task is one it hasn't routed to a project yet.
+- **Projects**: every registered project (name, directory, repo), read-only.
+
+Auto-refreshes every 2s so it picks up changes made by an agent via the CLI.
+
+Keys: `1`/`2` switch view, `Tab` cycle view, `a` add, `e` edit title, `s` start, `d` done, `x` drop, `r` requeue, `p` assign to an existing project (blank clears it back to unassigned), `D` delete, `/` cycle status filter, `q` quit.
 
 ## CLI (agent)
 
