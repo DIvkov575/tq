@@ -1,0 +1,5 @@
+{
+  "name": "expqueue",
+  "description": "File-backed experiment task queue (Textual TUI + agent CLI) plus an orchestrator-loop skill for driving multi-session c11 fleets against it",
+  "version": "1.0.0"
+}
