@@ -18,7 +18,15 @@ uv sync
 uv run expqueue-tui
 ```
 
-Keys: `a` add, `e` edit title, `s` start, `d` done, `x` drop, `r` requeue, `p` assign project, `D` delete, `/` cycle status filter, `q` quit. Auto-refreshes every 2s so it picks up changes made by an agent via the CLI. The table shows an icon + text status column and a project column for every task.
+The TUI has three views. Switch with `1`/`2`/`3` or cycle with `Tab`; the active view is highlighted (`*...*`) in the top bar. Auto-refreshes every 2s so it picks up changes made by an agent via the CLI.
+
+**1 — Queue view.** Tasks grouped into visual sections (RUNNING / QUEUED / COMPLETED) instead of a flat list, plus an icon + text status column and a project column. Tasks with no project sit in the general/unassigned queue (shown as `(unassigned)`) — useful for work meant to be triaged and auto-assigned to a project later (e.g. by an orchestrator agent) rather than picked by a human up front.
+
+Keys: `a` add, `e` edit title, `s` start, `d` done, `x` drop, `r` requeue, `p` assign to an existing project (blank clears it back to unassigned), `D` delete, `/` cycle status filter.
+
+**2 — State view.** A per-project dashboard, not per-task: one row per known project (plus `(unassigned)`) showing task count, the most recently touched task's status, and how long ago it was touched. Use this to see at a glance which projects have been worked recently.
+
+**3 — Config view.** Shows the current queue/projects/config file paths (from `EXPQUEUE_PATH` / `EXPQUEUE_PROJECTS_PATH` / `EXPQUEUE_CONFIG_PATH`, read-only) and the editable default project applied to new tasks added from the TUI. Press `e` to change it live.
 
 ## CLI (agent)
 
