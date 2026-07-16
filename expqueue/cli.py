@@ -12,6 +12,10 @@ Usage:
   expqueue project add <name> <directory> [--repo <owner/name>] [--create-repo] [--init-dir]
   expqueue project list [--json]
   expqueue project panes <name> [--json]
+  expqueue orchestrator log "<message>"
+  expqueue orchestrator recent [--limit N] [--json]
+  expqueue orchestrator claim <owner> [--json]
+  expqueue orchestrator release <owner>
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import argparse
 import json
 import sys
 
+from expqueue.orchestrator import OrchestratorStore
 from expqueue.panes import C11Unavailable, list_project_workspaces
 from expqueue.projects import ProjectStore, ensure_gh_repo
 from expqueue.store import QueueStore, STATUSES, Task
@@ -146,6 +151,45 @@ def cmd_project_panes(args: argparse.Namespace) -> None:
             print(f"    {s.ref} ({activity}) {s.title}")
 
 
+def cmd_orchestrator_log(args: argparse.Namespace) -> None:
+    store = OrchestratorStore()
+    event = store.log(args.message)
+    print(f"logged @ {event.ts:.0f}: {event.message}")
+
+
+def cmd_orchestrator_recent(args: argparse.Namespace) -> None:
+    store = OrchestratorStore()
+    events = store.recent(limit=args.limit)
+    if args.json:
+        print(json.dumps([e.to_dict() for e in events], indent=2))
+        return
+    if not events:
+        print("(no orchestrator activity logged)")
+        return
+    for e in events:
+        print(f"[{e.ts:.0f}] {e.message}")
+
+
+def cmd_orchestrator_claim(args: argparse.Namespace) -> None:
+    store = OrchestratorStore()
+    ok = store.claim(args.owner)
+    if args.json:
+        print(json.dumps({"claimed": ok}))
+        return
+    if ok:
+        print(f"claimed by {args.owner}")
+    else:
+        current = store.current_claim()
+        print(f"already claimed by {current['owner'] if current else 'unknown'}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_orchestrator_release(args: argparse.Namespace) -> None:
+    store = OrchestratorStore()
+    store.release(args.owner)
+    print(f"released (if held by {args.owner})")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="expqueue")
     sub = p.add_subparsers(dest="command", required=True)
@@ -219,6 +263,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_panes.add_argument("name")
     p_project_panes.add_argument("--json", action="store_true")
     p_project_panes.set_defaults(func=lambda store, args: cmd_project_panes(args))
+
+    p_orchestrator = sub.add_parser(
+        "orchestrator", help="orchestrator activity log and singleton run-slot claim"
+    )
+    orchestrator_sub = p_orchestrator.add_subparsers(dest="orchestrator_command", required=True)
+
+    p_orch_log = orchestrator_sub.add_parser("log", help="append an activity log entry")
+    p_orch_log.add_argument("message")
+    p_orch_log.set_defaults(func=lambda store, args: cmd_orchestrator_log(args))
+
+    p_orch_recent = orchestrator_sub.add_parser("recent", help="show recent activity log entries")
+    p_orch_recent.add_argument("--limit", type=int, default=5)
+    p_orch_recent.add_argument("--json", action="store_true")
+    p_orch_recent.set_defaults(func=lambda store, args: cmd_orchestrator_recent(args))
+
+    p_orch_claim = orchestrator_sub.add_parser(
+        "claim", help="attempt the singleton orchestrator run slot"
+    )
+    p_orch_claim.add_argument("owner")
+    p_orch_claim.add_argument("--json", action="store_true")
+    p_orch_claim.set_defaults(func=lambda store, args: cmd_orchestrator_claim(args))
+
+    p_orch_release = orchestrator_sub.add_parser(
+        "release", help="release the singleton orchestrator run slot"
+    )
+    p_orch_release.add_argument("owner")
+    p_orch_release.set_defaults(func=lambda store, args: cmd_orchestrator_release(args))
 
     return p
 

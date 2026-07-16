@@ -20,7 +20,7 @@ uv run expqueue-tui
 
 Two views, switchable with `1`/`2` or `Tab`:
 
-- **Queue** (default): tasks grouped into visual sections (RUNNING / QUEUED / COMPLETED), each row showing an icon + text status and a project column. Tasks with no project sit in the general/unassigned queue (shown as `(unassigned)`) — this is also the orchestrator's triage signal: an unassigned queued task is one it hasn't routed to a project yet.
+- **Queue** (default): tasks grouped into visual sections (RUNNING / QUEUED / COMPLETED), each row showing an icon + text status and a project column. Tasks with no project sit in the general/unassigned queue (shown as `(unassigned)`) — this is also the orchestrator's triage signal: an unassigned queued task is one it hasn't routed to a project yet. A panel at the bottom shows the 5 most recent orchestrator activity log entries (see Orchestrator below).
 - **Projects**: every registered project (name, directory, repo), read-only.
 
 Auto-refreshes every 2s so it picks up changes made by an agent via the CLI.
@@ -55,6 +55,19 @@ uv run expqueue project panes demo [--json]
 `--init-dir` creates the local directory (and runs `git init` inside it) if it doesn't already exist, so `project add` can bring a brand-new project into existence rather than only registering one that's already there. If the directory already exists, `--init-dir` registers it as-is without touching its contents.
 
 `project panes <name>` finds live [c11](https://docs.hub.amazon.dev/) workspaces/panes for a project by matching each c11 workspace's current working directory against the project's registered `directory` (exact match or subdirectory). For each matching workspace it lists every surface (tab) in it along with its derived `activity` (`working` / `idle` / `unknown`). This is discovery only — it does not decide which pane should get a task; an orchestrator reads this list (plus `read-screen` on candidate surfaces) to judge which session is actually idle before delivering a `pop --project <name>` task into it. Requires the `c11` CLI on `PATH` and a running c11 app; matching relies on c11's own "one workspace per project" convention, so a project multiplexed as one of several tabs inside an unrelated workspace (e.g. several repos crammed into a single "scratch" workspace) won't be found this way.
+
+### Orchestrator
+
+```
+uv run expqueue orchestrator log "<message>"
+uv run expqueue orchestrator recent [--limit N] [--json]
+uv run expqueue orchestrator claim <owner> [--json]
+uv run expqueue orchestrator release <owner>
+```
+
+A file-backed activity log (default `~/workplace/.expqueue/orchestrator.json`, override with `EXPQUEUE_ORCHESTRATOR_PATH`) that the orchestrator-loop skill appends a short breadcrumb to at the end of each cycle, so a human watching the Queue view (see below) can see what it's been doing without switching to its pane.
+
+`claim`/`release` implement a cooperative singleton run-slot: `claim <owner>` succeeds if unclaimed, already held by `<owner>` (acts as a heartbeat refresh), or the existing claim is older than the TTL (20 minutes, treated as abandoned); otherwise it fails so a second orchestrator cycle doesn't stack on top of one already running. This is cooperative, not access control — it only coordinates orchestrator-loop cycles that call `claim`/`release` themselves and can't stop an unrelated process from spawning its own c11 workspace directly.
 
 ## Tests
 

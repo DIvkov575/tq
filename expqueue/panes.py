@@ -50,19 +50,23 @@ class ProjectWorkspace:
         }
 
 
-def _run_c11(*args: str) -> dict:
+def _run_c11_raw(*args: str) -> str:
+    """Run `c11 <args>` and return raw stdout text (no --json, no parsing)."""
     if shutil.which("c11") is None:
         raise C11Unavailable("c11 CLI not found on PATH")
     try:
-        result = subprocess.run(
-            ["c11", "--json", *args], capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(["c11", *args], capture_output=True, text=True, timeout=10)
     except subprocess.TimeoutExpired as exc:
         raise C11Unavailable(f"c11 {' '.join(args)} timed out") from exc
     if result.returncode != 0:
         raise C11Unavailable(result.stderr.strip() or f"c11 {' '.join(args)} failed")
+    return result.stdout
+
+
+def _run_c11(*args: str) -> dict:
+    stdout = _run_c11_raw("--json", *args)
     try:
-        return json.loads(result.stdout)
+        return json.loads(stdout)
     except json.JSONDecodeError as exc:
         raise C11Unavailable(f"unexpected c11 output: {exc}") from exc
 

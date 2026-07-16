@@ -1,7 +1,8 @@
 """Textual TUI for the experiment queue.
 
 Two views, switchable with 1/2 or Tab:
-  1  Queue view    - tasks grouped into RUNNING / QUEUED / COMPLETED sections
+  1  Queue view    - tasks grouped into RUNNING / QUEUED / COMPLETED sections,
+                     plus a recent-orchestrator-activity panel at the bottom
   2  Projects view - registered projects: name, directory, repo
 
 Queue view keybindings:
@@ -24,6 +25,8 @@ Global:
 
 from __future__ import annotations
 
+import time
+
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -33,6 +36,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 
 from expqueue.config import ConfigStore
+from expqueue.orchestrator import OrchestratorStore
 from expqueue.projects import ProjectStore
 from expqueue.store import QueueStore, STATUSES, Task
 
@@ -122,6 +126,14 @@ class ExpQueueApp(App):
         color: $text-muted;
         padding: 0 1;
     }
+    #orchestrator-panel {
+        height: auto;
+        max-height: 8;
+        background: $panel;
+        color: $text-muted;
+        padding: 0 1;
+        border-top: solid $accent;
+    }
     """
 
     BINDINGS = [
@@ -148,6 +160,7 @@ class ExpQueueApp(App):
         self.store = QueueStore()
         self.project_store = ProjectStore()
         self.config_store = ConfigStore()
+        self.orchestrator_store = OrchestratorStore()
         self._rows: list[Task] = []
         self._header_keys: set[str] = set()
 
@@ -157,6 +170,7 @@ class ExpQueueApp(App):
         yield Static("filter: all", id="status-bar")
         yield DataTable(id="queue-table", cursor_type="row", zebra_stripes=True)
         yield DataTable(id="projects-table", cursor_type="row", zebra_stripes=True)
+        yield Static(id="orchestrator-panel")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -167,6 +181,7 @@ class ExpQueueApp(App):
     def refresh_all(self) -> None:
         self.refresh_table()
         self.refresh_projects_view()
+        self.refresh_orchestrator_panel()
 
     # -- view switching ---------------------------------------------------
 
@@ -183,9 +198,11 @@ class ExpQueueApp(App):
         queue_table = self.query_one("#queue-table", DataTable)
         projects_table = self.query_one("#projects-table", DataTable)
         status_bar = self.query_one("#status-bar", Static)
+        orchestrator_panel = self.query_one("#orchestrator-panel", Static)
 
         queue_table.display = self.active_view == "queue"
         status_bar.display = self.active_view == "queue"
+        orchestrator_panel.display = self.active_view == "queue"
         projects_table.display = self.active_view == "projects"
 
         bar = self.query_one("#view-bar", Static)
@@ -365,6 +382,18 @@ class ExpQueueApp(App):
         if task_id:
             self.store.remove(task_id)
             self.refresh_table()
+
+    def refresh_orchestrator_panel(self) -> None:
+        panel = self.query_one("#orchestrator-panel", Static)
+        events = self.orchestrator_store.recent(limit=5)
+        if not events:
+            panel.update("orchestrator: (no activity logged)")
+            return
+        lines = ["orchestrator activity:"]
+        for e in events:
+            when = time.strftime("%H:%M:%S", time.localtime(e.ts))
+            lines.append(f"  [{when}] {e.message}")
+        panel.update("\n".join(lines))
 
     # -- projects view ----------------------------------------------------
 
