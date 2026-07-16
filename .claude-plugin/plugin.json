@@ -1,5 +1,0 @@
-{
-  "name": "tq",
-  "description": "File-backed task queue (Textual TUI + CLI) tightly coupled to a persistent tq-orchestrator skill for driving a shared c11 workspace against it",
-  "version": "1.0.0"
-}
