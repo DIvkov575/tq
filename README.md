@@ -48,6 +48,7 @@ uv run expqueue edit <id> [--title "..."] [--notes "..."] [--project demo]
 uv run expqueue project add demo ~/workplace/demo [--repo me/demo] [--create-repo] [--init-dir]
 uv run expqueue project list [--json]
 uv run expqueue project panes demo [--json]
+uv run expqueue project spawn demo /tmp/prompt.md [--title "demo :: New Feature"]
 ```
 
 `--create-repo` creates the GitHub repo via `gh repo create` if it doesn't already exist (requires `gh` to be authenticated). Assign a task to a project with `push --project <name>` or `edit <id> --project <name>`.
@@ -55,6 +56,8 @@ uv run expqueue project panes demo [--json]
 `--init-dir` creates the local directory (and runs `git init` inside it) if it doesn't already exist, so `project add` can bring a brand-new project into existence rather than only registering one that's already there. If the directory already exists, `--init-dir` registers it as-is without touching its contents.
 
 `project panes <name>` finds live [c11](https://docs.hub.amazon.dev/) workspaces/panes for a project by matching each c11 workspace's current working directory against the project's registered `directory` (exact match or subdirectory). For each matching workspace it lists every surface (tab) in it along with its derived `activity` (`working` / `idle` / `unknown`). This is discovery only — it does not decide which pane should get a task; an orchestrator reads this list (plus `read-screen` on candidate surfaces) to judge which session is actually idle before delivering a `pop --project <name>` task into it. Requires the `c11` CLI on `PATH` and a running c11 app; matching relies on c11's own "one workspace per project" convention, so a project multiplexed as one of several tabs inside an unrelated workspace (e.g. several repos crammed into a single "scratch" workspace) won't be found this way.
+
+`project spawn <name> <prompt-file>` creates a fresh c11 workspace at the project's directory and launches `claude --dangerously-skip-permissions` into it with the given prompt file, verifying the launch actually landed before returning. Handles two c11 race conditions found by hand-testing (task bc8988a3): a freshly created surface's PTY isn't always live yet, so the launch command can be typed but never submitted; and polling `read-screen` on a no-longer-selected workspace can return a stale snapshot well after the agent actually started, making a successful launch look hung. `project spawn` re-selects the workspace to force a fresh render on each poll and resubmits once via a bare `Return` keypress if the command text landed without executing, raising `C11Unavailable` only if the agent's startup banner never appears within 20s.
 
 ### Orchestrator
 

@@ -12,6 +12,7 @@ Usage:
   expqueue project add <name> <directory> [--repo <owner/name>] [--create-repo] [--init-dir]
   expqueue project list [--json]
   expqueue project panes <name> [--json]
+  expqueue project spawn <name> <prompt-file> [--title "<title>"]
   expqueue orchestrator log "<message>"
   expqueue orchestrator recent [--limit N] [--json]
   expqueue orchestrator claim <owner> [--json]
@@ -25,7 +26,7 @@ import json
 import sys
 
 from expqueue.orchestrator import OrchestratorStore
-from expqueue.panes import C11Unavailable, list_project_workspaces
+from expqueue.panes import C11Unavailable, list_project_workspaces, spawn_background_agent
 from expqueue.projects import ProjectStore, ensure_gh_repo
 from expqueue.store import QueueStore, STATUSES, Task
 
@@ -151,6 +152,22 @@ def cmd_project_panes(args: argparse.Namespace) -> None:
             print(f"    {s.ref} ({activity}) {s.title}")
 
 
+def cmd_project_spawn(args: argparse.Namespace) -> None:
+    pstore = ProjectStore()
+    project = pstore.get(args.name)
+    if project is None:
+        print(f"no project named {args.name}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        workspace_ref, surface_ref = spawn_background_agent(
+            project.directory, args.prompt_file, title=args.title
+        )
+    except C11Unavailable as exc:
+        print(f"spawn failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"spawned agent in {workspace_ref}/{surface_ref}")
+
+
 def cmd_orchestrator_log(args: argparse.Namespace) -> None:
     store = OrchestratorStore()
     event = store.log(args.message)
@@ -263,6 +280,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_panes.add_argument("name")
     p_project_panes.add_argument("--json", action="store_true")
     p_project_panes.set_defaults(func=lambda store, args: cmd_project_panes(args))
+
+    p_project_spawn = project_sub.add_parser(
+        "spawn", help="spawn a fresh c11 workspace and launch an agent into it"
+    )
+    p_project_spawn.add_argument("name")
+    p_project_spawn.add_argument("prompt_file")
+    p_project_spawn.add_argument("--title", default=None)
+    p_project_spawn.set_defaults(func=lambda store, args: cmd_project_spawn(args))
 
     p_orchestrator = sub.add_parser(
         "orchestrator", help="orchestrator activity log and singleton run-slot claim"

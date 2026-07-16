@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from expqueue.panes import C11Unavailable, list_project_workspaces
+from expqueue.panes import C11Unavailable, list_project_workspaces, spawn_background_agent
 
 
 def _completed(stdout: str = "", returncode: int = 0, stderr: str = ""):
@@ -116,3 +116,78 @@ def test_raises_when_c11_missing(mock_which) -> None:
 def test_raises_on_nonzero_exit(mock_run, mock_which) -> None:
     with pytest.raises(C11Unavailable):
         list_project_workspaces("/tmp/demo")
+
+
+TREE_SPAWN = {
+    "windows": [
+        {
+            "workspaces": [
+                {"panes": [{"surfaces": [{"ref": "surface:23", "title": "shell"}]}]},
+            ]
+        }
+    ]
+}
+
+
+@patch("expqueue.panes.shutil.which", return_value="/usr/bin/c11")
+@patch("expqueue.panes.time.sleep")
+@patch("expqueue.panes.time.monotonic", side_effect=[0, 1])
+@patch("expqueue.panes.subprocess.run")
+def test_spawn_background_agent_happy_path(mock_run, mock_monotonic, mock_sleep, mock_which) -> None:
+    mock_run.side_effect = [
+        _completed(stdout="OK workspace:5"),  # new-workspace
+        _completed(stdout="OK"),  # select-workspace (initial)
+        _completed(stdout=json.dumps(TREE_SPAWN)),  # --json tree
+        _completed(stdout="OK"),  # send
+        _completed(stdout="OK"),  # select-workspace (poll)
+        _completed(stdout="Claude Code v2.1.205 ready"),  # read-screen
+    ]
+    workspace_ref, surface_ref = spawn_background_agent("/tmp/demo", "/tmp/prompt.md")
+    assert workspace_ref == "workspace:5"
+    assert surface_ref == "surface:23"
+
+
+@patch("expqueue.panes.shutil.which", return_value="/usr/bin/c11")
+@patch("expqueue.panes.time.sleep")
+@patch("expqueue.panes.time.monotonic", side_effect=[0, 1, 2])
+@patch("expqueue.panes.subprocess.run")
+def test_spawn_background_agent_resubmits_dropped_return(
+    mock_run, mock_monotonic, mock_sleep, mock_which
+) -> None:
+    """Simulates the lazy-init race: the launch command's text lands but the
+    Return is dropped, so the first poll only shows the still-unsubmitted
+    command; a bare `enter` keypress is resubmitted and the second poll
+    shows the agent actually launched."""
+    mock_run.side_effect = [
+        _completed(stdout="OK workspace:5"),  # new-workspace
+        _completed(stdout="OK"),  # select-workspace (initial)
+        _completed(stdout=json.dumps(TREE_SPAWN)),  # --json tree
+        _completed(stdout="OK"),  # send
+        _completed(stdout="OK"),  # select-workspace (poll 1)
+        _completed(stdout='❯ claude --dangerously-skip-permissions "..."'),  # read-screen: stuck
+        _completed(stdout="OK"),  # send-key enter (resubmit)
+        _completed(stdout="OK"),  # select-workspace (poll 2)
+        _completed(stdout="Claude Code v2.1.205 ready"),  # read-screen: launched
+    ]
+    workspace_ref, surface_ref = spawn_background_agent("/tmp/demo", "/tmp/prompt.md")
+    assert workspace_ref == "workspace:5"
+    assert surface_ref == "surface:23"
+    resubmit_calls = [c for c in mock_run.call_args_list if c.args[0][1] == "send-key"]
+    assert len(resubmit_calls) == 1
+
+
+@patch("expqueue.panes.shutil.which", return_value="/usr/bin/c11")
+@patch("expqueue.panes.time.sleep")
+@patch("expqueue.panes.time.monotonic", side_effect=[0, 25])
+@patch("expqueue.panes.subprocess.run")
+def test_spawn_background_agent_raises_when_launch_never_lands(
+    mock_run, mock_monotonic, mock_sleep, mock_which
+) -> None:
+    mock_run.side_effect = [
+        _completed(stdout="OK workspace:5"),  # new-workspace
+        _completed(stdout="OK"),  # select-workspace (initial)
+        _completed(stdout=json.dumps(TREE_SPAWN)),  # --json tree
+        _completed(stdout="OK"),  # send
+    ]
+    with pytest.raises(C11Unavailable):
+        spawn_background_agent("/tmp/demo", "/tmp/prompt.md")

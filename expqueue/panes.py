@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -103,6 +104,97 @@ def _list_surfaces(workspace_ref: str) -> list[Surface]:
                         )
                     )
     return surfaces
+
+
+SPAWN_LAUNCH_TIMEOUT_SECONDS = 20
+SPAWN_POLL_INTERVAL_SECONDS = 1.5
+
+
+def _first_surface_ref(tree: dict) -> str | None:
+    for window in tree.get("windows", []):
+        for ws in window.get("workspaces", []):
+            for pane in ws.get("panes", []):
+                for s in pane.get("surfaces", []):
+                    return s.get("ref")
+    return None
+
+
+def spawn_background_agent(
+    directory: str,
+    prompt_path: str,
+    *,
+    title: str | None = None,
+    launch_cmd: str = "claude --dangerously-skip-permissions",
+    ready_marker: str = "Claude Code",
+) -> tuple[str, str]:
+    """Create a new c11 workspace and launch an agent into it, verifying the
+    launch actually took before returning.
+
+    Two failure modes observed when spawning several agents back-to-back
+    (reproduced manually, see task bc8988a3):
+
+    1. **Lazy-init race**: a freshly created workspace's surface has no live
+       PTY until c11 finishes a layout pass, so `send`ing the launch command
+       immediately after `new-workspace` can drop it -- `send`'s "OK" only
+       confirms the socket call was accepted, not that the PTY consumed it.
+    2. **Stale `read-screen` on a background surface**: once a workspace is
+       no longer the selected one, `read-screen` can keep returning a frozen
+       snapshot from before the agent launched, even seconds later and even
+       across repeated polls -- a caller that trusts one `read-screen` call
+       (or several spaced-out ones) can wrongly conclude the launch hung.
+       Re-selecting the workspace forces a fresh render.
+
+    This selects the new workspace (forcing the layout pass) before sending
+    the launch command, then polls for the agent's startup banner,
+    re-selecting the workspace on each poll to force a fresh render rather
+    than trusting a single `read-screen` snapshot.
+    """
+    if shutil.which("c11") is None:
+        raise C11Unavailable("c11 CLI not found on PATH")
+
+    args = ["new-workspace", "--cwd", directory]
+    if title:
+        args += ["--title", title]
+    ws_out = _run_c11_raw(*args)
+    workspace_ref = ws_out.strip().split()[-1]
+
+    # Force the layout pass so the surface's PTY is actually live before we
+    # send anything -- see c11's "surface initialization quirk".
+    _run_c11_raw("select-workspace", "--workspace", workspace_ref)
+    time.sleep(1.5)
+
+    tree = _run_c11("tree", "--workspace", workspace_ref, "--no-layout")
+    surface_ref = _first_surface_ref(tree)
+    if surface_ref is None:
+        raise C11Unavailable(f"workspace {workspace_ref} has no surface to launch into")
+
+    command = f'cd {directory} && {launch_cmd} "Read {prompt_path} and follow the instructions."'
+    _run_c11_raw("send", "--workspace", workspace_ref, "--surface", surface_ref, command)
+
+    deadline = time.monotonic() + SPAWN_LAUNCH_TIMEOUT_SECONDS
+    resubmitted = False
+    while time.monotonic() < deadline:
+        time.sleep(SPAWN_POLL_INTERVAL_SECONDS)
+        # Re-select to force a fresh render -- a plain read-screen on a
+        # background surface can otherwise return a stale snapshot.
+        _run_c11_raw("select-workspace", "--workspace", workspace_ref)
+        screen = _run_c11_raw(
+            "read-screen", "--workspace", workspace_ref, "--surface", surface_ref, "--lines", "40"
+        )
+        if ready_marker in screen:
+            return workspace_ref, surface_ref
+        if not resubmitted and launch_cmd in screen:
+            # The command text landed but never submitted -- Return was
+            # dropped by the same lazy-init race. Resubmit once via a bare
+            # keypress rather than retyping, to avoid a duplicate command
+            # concatenating onto a partially-landed line.
+            _run_c11_raw("send-key", "--workspace", workspace_ref, "--surface", surface_ref, "enter")
+            resubmitted = True
+
+    raise C11Unavailable(
+        f"agent launch into {workspace_ref}/{surface_ref} did not land within "
+        f"{SPAWN_LAUNCH_TIMEOUT_SECONDS}s"
+    )
 
 
 def list_project_workspaces(directory: str) -> list[ProjectWorkspace]:

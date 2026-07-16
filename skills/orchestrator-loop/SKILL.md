@@ -36,15 +36,20 @@ Each time this runs (typically on a `/loop` cron cadence):
         <owner/name> --create-repo` only if the task text implies
         GitHub-backed (e.g. says "remote project"); otherwise local-only.
      3. `expqueue edit <id> --project <name>`.
-     4. Spawn a fresh agent: `c11 new-workspace --cwd <dir>`, then launch
-        `claude --dangerously-skip-permissions "<task title + notes as the
-        prompt>"` as a one-shot argv launch (see the c11 skill's
-        "Preferred — one-shot prompt via claude argv" pattern — no
-        ready-state race, no polling). The new session receives the task
-        as its initial prompt, so it owns the work immediately; do not
-        also leave the task queued for a `pop`.
+     4. Write the task title + notes to a prompt file, then spawn:
+        `expqueue project spawn <name> <prompt-file> [--title "<tab title>"]`.
+        Do not hand-roll `c11 new-workspace` + `send` yourself — a fresh
+        workspace's surface can have a not-yet-live PTY, and background
+        `read-screen` polling can return a stale snapshot even seconds after
+        the launch actually happened (see the c11 skill's "surface
+        initialization quirk" and task bc8988a3's findings); `project spawn`
+        forces the layout pass, verifies the launch actually landed, and
+        resubmits once if the Return got dropped. The new session receives
+        the task as its initial prompt, so it owns the work immediately; do
+        not also leave the task queued for a `pop`.
      5. Name the new workspace/tab per the c11 orchestration skill's
-        tab-naming convention before or immediately after launch.
+        tab-naming convention right after `project spawn` returns (it
+        prints the `workspace/surface` refs).
    - **Ambiguous** — you cannot confidently place it in either bucket
      above → leave it `queued` and unassigned, and escalate to the user
      (see step 5) rather than guess. Do not create a project speculatively.
@@ -120,6 +125,7 @@ expqueue pop [--project demo] --json     # FIFO pop, marks in_progress
 expqueue done <id> / drop <id>
 expqueue project panes demo --json       # discover demo's live c11 panes
 expqueue project add <name> <dir> --init-dir [--repo <owner/name> --create-repo]
+expqueue project spawn demo /tmp/prompt.md [--title "demo :: New Feature"]  # reliable background launch
 
 c11 tree --workspace <ref> --no-layout --report
 c11 read-screen --surface <ref>
