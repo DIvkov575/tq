@@ -1,10 +1,19 @@
-# expqueue
+# tq
 
-A tiny file-backed experiment task queue: a Textual TUI for the human, a CLI for agents.
+A tiny file-backed task queue tightly coupled to a persistent c11
+orchestrator agent: a Textual TUI for the human (informational only), a CLI
+for the orchestrator and for manual/debug use.
 
-Storage is a single JSON file (default `~/workplace/.expqueue/queue.json`, override with `EXPQUEUE_PATH`), guarded by an flock so the TUI and CLI can read/write concurrently without corruption.
+Storage is a single JSON file (default `~/workplace/.tq/queue.json`,
+override with `TQ_PATH`), guarded by an flock so the TUI and CLI can
+read/write concurrently without corruption.
 
-Tasks carry a status (`queued` / `in_progress` / `done` / `dropped`) and an optional project assignment. Projects are tracked separately in a registry file (default `~/workplace/.expqueue/projects.json`, override with `EXPQUEUE_PROJECTS_PATH`), each with a name, an associated local directory, and an optional GitHub repo.
+Tasks carry a status (`queued` / `in_progress` / `done` / `dropped`) and an
+optional project assignment. Projects are tracked separately in a registry
+file (default `~/workplace/.tq/projects.json`, override with
+`TQ_PROJECTS_PATH`), each with a name, an associated local directory, an
+optional GitHub repo, and — once the orchestrator has delivered work to it —
+a bound c11 pane (`workspace_ref` / `surface_ref`).
 
 ## Install
 
@@ -12,65 +21,88 @@ Tasks carry a status (`queued` / `in_progress` / `done` / `dropped`) and an opti
 uv sync
 ```
 
-## TUI (human)
+## TUI (human, informational only)
 
 ```
-uv run expqueue-tui
+uv run tq-tui
 ```
 
-Two views, switchable with `1`/`2` or `Tab`:
+The TUI is not a control surface — the orchestrator is. It exists to
+visualize the queue and give a trace of what the orchestrator knows.
 
-- **Queue** (default): tasks grouped into visual sections (RUNNING / QUEUED / COMPLETED), each row showing an icon + text status and a project column. Tasks with no project sit in the general/unassigned queue (shown as `(unassigned)`) — this is also the orchestrator's triage signal: an unassigned queued task is one it hasn't routed to a project yet. A panel at the bottom shows the 5 most recent orchestrator activity log entries (see Orchestrator below).
-- **Projects**: every registered project (name, directory, repo), read-only.
+- **Queue view** (default, `1`): tasks grouped into RUNNING / QUEUED /
+  COMPLETED sections. An unassigned queued task (project column shows
+  `(unassigned)`) is the orchestrator's triage signal — it hasn't routed it
+  to a project yet. The bottom panel shows orchestrator health (alive/not
+  running, idle/working) and its 5 most recent activity log entries.
+- **Projects view** (`2`): every registered project — name, directory,
+  repo (blank = local-only), bound pane (`workspace_ref`/`surface_ref`, or
+  `(unbound)`), and that pane's live status (`idle` / `working` / `unknown`
+  / `gone`).
 
-Auto-refreshes every 2s so it picks up changes made by an agent via the CLI.
+Auto-refreshes every 2s so it picks up changes made by the orchestrator or
+CLI. Keys: `1`/`2` switch view, `Tab` cycle view, `a` add, `e` edit title,
+`d` done, `x` drop, `s` start, `r` requeue, `p` assign to an existing project,
+`D` delete, `/` cycle status filter, `q` quit.
 
-Keys: `1`/`2` switch view, `Tab` cycle view, `a` add, `e` edit title, `s` start, `d` done, `x` drop, `r` requeue, `p` assign to an existing project (blank clears it back to unassigned), `D` delete, `/` cycle status filter, `q` quit.
-
-## CLI (agent)
+## CLI (orchestrator + manual use)
 
 ```
-uv run expqueue push "Run ablation A" --notes "vary lr" [--project demo]
-uv run expqueue list [--status queued] [--project demo] [--json]
-uv run expqueue pop [--project demo] [--json]      # FIFO pop, marks in_progress
-uv run expqueue start <id>
-uv run expqueue done <id>
-uv run expqueue drop <id>
-uv run expqueue rm <id>
-uv run expqueue edit <id> [--title "..."] [--notes "..."] [--project demo]
+uv run tq push "Run ablation A" --notes "vary lr" [--project demo]
+uv run tq list [--status queued] [--project demo] [--json]
+uv run tq pop [--project demo] [--json]      # manual FIFO pop, marks in_progress (debug only — the orchestrator pushes, it doesn't pop)
+uv run tq start <id>
+uv run tq done <id>
+uv run tq drop <id>
+uv run tq rm <id>
+uv run tq edit <id> [--title "..."] [--notes "..."] [--project demo]
 ```
-
-`pop --project <name>` scopes the FIFO pop to tasks assigned to that project, so an orchestrator managing several projects' queues can pull each project's next task independently instead of always taking the oldest task overall.
 
 ### Projects
 
 ```
-uv run expqueue project add demo ~/workplace/demo [--repo me/demo] [--create-repo] [--init-dir]
-uv run expqueue project list [--json]
-uv run expqueue project panes demo [--json]
-uv run expqueue project spawn demo /tmp/prompt.md [--title "demo :: New Feature"]
+uv run tq project add demo ~/workplace/demo [--repo me/demo] [--create-repo] [--init-dir]
+uv run tq project list [--json]
+uv run tq project bind demo /tmp/prompt.md
 ```
 
-`--create-repo` creates the GitHub repo via `gh repo create` if it doesn't already exist (requires `gh` to be authenticated). Assign a task to a project with `push --project <name>` or `edit <id> --project <name>`.
+`--create-repo` creates the GitHub repo via `gh repo create` if it doesn't
+already exist (requires `gh` to be authenticated). `--init-dir` creates the
+local directory (and runs `git init` inside it) if it doesn't already exist.
 
-`--init-dir` creates the local directory (and runs `git init` inside it) if it doesn't already exist, so `project add` can bring a brand-new project into existence rather than only registering one that's already there. If the directory already exists, `--init-dir` registers it as-is without touching its contents.
-
-`project panes <name>` finds live [c11](https://docs.hub.amazon.dev/) workspaces/panes for a project by matching each c11 workspace's current working directory against the project's registered `directory` (exact match or subdirectory). For each matching workspace it lists every surface (tab) in it along with its derived `activity` (`working` / `idle` / `unknown`). This is discovery only — it does not decide which pane should get a task; an orchestrator reads this list (plus `read-screen` on candidate surfaces) to judge which session is actually idle before delivering a `pop --project <name>` task into it. Requires the `c11` CLI on `PATH` and a running c11 app; matching relies on c11's own "one workspace per project" convention, so a project multiplexed as one of several tabs inside an unrelated workspace (e.g. several repos crammed into a single "scratch" workspace) won't be found this way.
-
-`project spawn <name> <prompt-file>` creates a fresh c11 workspace at the project's directory and launches `claude --dangerously-skip-permissions` into it with the given prompt file, verifying the launch actually landed before returning. Handles two c11 race conditions found by hand-testing (task bc8988a3): a freshly created surface's PTY isn't always live yet, so the launch command can be typed but never submitted; and polling `read-screen` on a no-longer-selected workspace can return a stale snapshot well after the agent actually started, making a successful launch look hung. `project spawn` re-selects the workspace to force a fresh render on each poll and resubmits once via a bare `Return` keypress if the command text landed without executing, raising `C11Unavailable` only if the agent's startup banner never appears within 20s.
+`project bind <name> <prompt-file>` creates a new pane for `<name>` inside
+the shared c11 workspace and launches an agent into it with the prompt
+file's contents as its first task. This is normally called by the
+orchestrator itself the first time it needs to deliver work to a project
+with no pane yet — see the `tq-orchestrator` skill.
 
 ### Orchestrator
 
 ```
-uv run expqueue orchestrator log "<message>"
-uv run expqueue orchestrator recent [--limit N] [--json]
-uv run expqueue orchestrator claim <owner> [--json]
-uv run expqueue orchestrator release <owner>
+uv run tq orchestrator log "<message>"
+uv run tq orchestrator recent [--limit N] [--json]
+uv run tq orchestrator claim <owner> [--json]
+uv run tq orchestrator release <owner>
+uv run tq orchestrator ensure <prompt-file>
 ```
 
-A file-backed activity log (default `~/workplace/.expqueue/orchestrator.json`, override with `EXPQUEUE_ORCHESTRATOR_PATH`) that the orchestrator-loop skill appends a short breadcrumb to at the end of each cycle, so a human watching the Queue view (see below) can see what it's been doing without switching to its pane.
+The orchestrator is a **persistent** c11 agent — one pane, nudged by a cron
+cadence (e.g. `/loop 5m`) rather than respawned each cycle, so its context
+accumulates across cycles. `tq orchestrator ensure <prompt-file>` checks
+whether the recorded orchestrator pane (`Config.orchestrator_workspace_ref`
+/ `orchestrator_surface_ref`) is still alive, and spawns a fresh one into the
+shared workspace (`Config.shared_workspace_ref`, created on first use) if
+not. Call this before nudging, and on tq TUI startup.
 
-`claim`/`release` implement a cooperative singleton run-slot: `claim <owner>` succeeds if unclaimed, already held by `<owner>` (acts as a heartbeat refresh), or the existing claim is older than the TTL (20 minutes, treated as abandoned); otherwise it fails so a second orchestrator cycle doesn't stack on top of one already running. This is cooperative, not access control — it only coordinates orchestrator-loop cycles that call `claim`/`release` themselves and can't stop an unrelated process from spawning its own c11 workspace directly.
+`claim <owner>` / `release <owner>` implement a short-lived (60s) cooperative
+mutex purely around the "ensure orchestrator is alive, spawn if not"
+sequence — not a whole cycle — so two processes racing to notice a dead
+orchestrator don't both spawn a replacement.
+
+The orchestrator's own behavior (which project a task belongs to, when to
+bind a new pane vs. deliver into an existing one, driving obvious in-pane
+decisions, what to escalate) is documented in the `tq-orchestrator` skill,
+not in this CLI.
 
 ## Tests
 

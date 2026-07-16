@@ -1,15 +1,16 @@
-"""File-backed orchestrator activity log and best-effort singleton claim.
+"""File-backed orchestrator activity log and a short-lived spawn mutex.
 
-The orchestrator-loop skill calls this at the end of each cycle to leave a
-short breadcrumb the TUI's Queue view can surface (so a human watching the
-queue can see what the orchestrator has been doing without switching to its
-pane), and at the start of each cycle to claim a singleton "run" slot.
+The orchestrator is a persistent c11 agent, nudged by cron rather than
+respawned each cycle (see the tq-orchestrator skill). `claim`/`release` no
+longer guard a whole cycle's worth of work -- they guard only the brief
+"ensure orchestrator is alive, spawn a replacement if not" sequence, so two
+processes racing to notice a dead orchestrator pane don't both spawn one.
 
 The claim is cooperative, not access control: it only prevents *cooperating*
-orchestrator-loop cycles (ones that call `claim`/`release` themselves) from
-stacking. It cannot stop an arbitrary session from spawning its own c11
-workspace and launching an agent directly -- there is no privilege boundary
-in this system to enforce that against a non-cooperating process.
+callers (ones that call `claim`/`release` themselves) from racing a spawn.
+It cannot stop an arbitrary session from spawning its own c11 workspace and
+launching an agent directly -- there is no privilege boundary in this system
+to enforce that against a non-cooperating process.
 """
 
 from __future__ import annotations
@@ -24,13 +25,13 @@ from pathlib import Path
 
 DEFAULT_ORCHESTRATOR_PATH = Path(
     os.environ.get(
-        "EXPQUEUE_ORCHESTRATOR_PATH",
-        Path.home() / "workplace" / ".expqueue" / "orchestrator.json",
+        "TQ_ORCHESTRATOR_PATH",
+        Path.home() / "workplace" / ".tq" / "orchestrator.json",
     )
 )
 
 MAX_EVENTS = 20
-CLAIM_TTL_SECONDS = 20 * 60  # a claim older than this is treated as abandoned
+CLAIM_TTL_SECONDS = 60  # a claim older than this is treated as abandoned
 
 
 @dataclass

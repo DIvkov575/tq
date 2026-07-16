@@ -18,8 +18,8 @@ from pathlib import Path
 
 DEFAULT_PROJECTS_PATH = Path(
     os.environ.get(
-        "EXPQUEUE_PROJECTS_PATH",
-        Path.home() / "workplace" / ".expqueue" / "projects.json",
+        "TQ_PROJECTS_PATH",
+        Path.home() / "workplace" / ".tq" / "projects.json",
     )
 )
 
@@ -29,6 +29,8 @@ class Project:
     name: str
     directory: str
     repo: str | None = None
+    workspace_ref: str | None = None
+    surface_ref: str | None = None
     created_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
@@ -40,6 +42,8 @@ class Project:
             name=d["name"],
             directory=d["directory"],
             repo=d.get("repo"),
+            workspace_ref=d.get("workspace_ref"),
+            surface_ref=d.get("surface_ref"),
             created_at=d.get("created_at", time.time()),
         )
 
@@ -104,6 +108,28 @@ class ProjectStore:
             items.append(project.to_dict())
             self._write_raw(items)
         return project
+
+    def bind(self, name: str, workspace_ref: str, surface_ref: str) -> Project | None:
+        with self._locked():
+            items = self._read_raw()
+            for d in items:
+                if d["name"] == name:
+                    d["workspace_ref"] = workspace_ref
+                    d["surface_ref"] = surface_ref
+                    self._write_raw(items)
+                    return Project.from_dict(d)
+        return None
+
+    def clear_binding(self, name: str) -> Project | None:
+        with self._locked():
+            items = self._read_raw()
+            for d in items:
+                if d["name"] == name:
+                    d["workspace_ref"] = None
+                    d["surface_ref"] = None
+                    self._write_raw(items)
+                    return Project.from_dict(d)
+        return None
 
 
 def ensure_gh_repo(repo: str) -> bool:

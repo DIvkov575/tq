@@ -1,9 +1,9 @@
-"""File-backed, user-editable settings for expqueue.
+"""File-backed, user-editable settings for tq.
 
 This is distinct from the queue/project *data* files: it holds small
 preferences (currently just a default project for new tasks) that the TUI's
 config view can show and edit live. Queue/project storage paths themselves
-are controlled by the EXPQUEUE_PATH / EXPQUEUE_PROJECTS_PATH env vars and are
+are controlled by the TQ_PATH / TQ_PROJECTS_PATH env vars and are
 surfaced read-only in the config view.
 """
 
@@ -17,20 +17,28 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path(
-    os.environ.get("EXPQUEUE_CONFIG_PATH", Path.home() / "workplace" / ".expqueue" / "config.json")
+    os.environ.get("TQ_CONFIG_PATH", Path.home() / "workplace" / ".tq" / "config.json")
 )
 
 
 @dataclass
 class Config:
     default_project: str | None = None
+    shared_workspace_ref: str | None = None
+    orchestrator_workspace_ref: str | None = None
+    orchestrator_surface_ref: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @staticmethod
     def from_dict(d: dict) -> "Config":
-        return Config(default_project=d.get("default_project"))
+        return Config(
+            default_project=d.get("default_project"),
+            shared_workspace_ref=d.get("shared_workspace_ref"),
+            orchestrator_workspace_ref=d.get("orchestrator_workspace_ref"),
+            orchestrator_surface_ref=d.get("orchestrator_surface_ref"),
+        )
 
 
 class ConfigStore:
@@ -72,5 +80,28 @@ class ConfigStore:
         with self._locked():
             data = self._read_raw()
             data["default_project"] = project or None
+            self._write_raw(data)
+            return Config.from_dict(data)
+
+    def set_shared_workspace_ref(self, workspace_ref: str) -> Config:
+        with self._locked():
+            data = self._read_raw()
+            data["shared_workspace_ref"] = workspace_ref
+            self._write_raw(data)
+            return Config.from_dict(data)
+
+    def set_orchestrator_pane(self, workspace_ref: str, surface_ref: str) -> Config:
+        with self._locked():
+            data = self._read_raw()
+            data["orchestrator_workspace_ref"] = workspace_ref
+            data["orchestrator_surface_ref"] = surface_ref
+            self._write_raw(data)
+            return Config.from_dict(data)
+
+    def clear_orchestrator_pane(self) -> Config:
+        with self._locked():
+            data = self._read_raw()
+            data["orchestrator_workspace_ref"] = None
+            data["orchestrator_surface_ref"] = None
             self._write_raw(data)
             return Config.from_dict(data)

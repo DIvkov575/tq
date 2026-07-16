@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 DEFAULT_QUEUE_PATH = Path(
-    os.environ.get("EXPQUEUE_PATH", Path.home() / "workplace" / ".expqueue" / "queue.json")
+    os.environ.get("TQ_PATH", Path.home() / "workplace" / ".tq" / "queue.json")
 )
 
 STATUSES = ("queued", "in_progress", "done", "dropped")

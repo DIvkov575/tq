@@ -1,5 +1,5 @@
 {
-  "name": "expqueue",
-  "description": "File-backed experiment task queue (Textual TUI + agent CLI) plus an orchestrator-loop skill for driving multi-session c11 fleets against it",
+  "name": "tq",
+  "description": "File-backed task queue (Textual TUI + CLI) tightly coupled to a persistent tq-orchestrator skill for driving a shared c11 workspace against it",
   "version": "1.0.0"
 }

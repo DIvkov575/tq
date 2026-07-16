@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from expqueue.orchestrator import OrchestratorStore
+from tq.orchestrator import OrchestratorStore
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def test_recent_empty_when_no_events(store: OrchestratorStore) -> None:
 
 
 def test_log_trims_to_max_events(store: OrchestratorStore) -> None:
-    from expqueue.orchestrator import MAX_EVENTS
+    from tq.orchestrator import MAX_EVENTS
 
     for i in range(MAX_EVENTS + 5):
         store.log(f"event {i}")
@@ -69,7 +69,7 @@ def test_release_is_noop_for_non_holder(store: OrchestratorStore) -> None:
 
 
 def test_claim_succeeds_after_stale_ttl(store: OrchestratorStore, monkeypatch) -> None:
-    import expqueue.orchestrator as orchestrator_mod
+    import tq.orchestrator as orchestrator_mod
 
     store.claim("owner-a")
 
@@ -80,3 +80,9 @@ def test_claim_succeeds_after_stale_ttl(store: OrchestratorStore, monkeypatch) -
 
     monkeypatch.setattr(orchestrator_mod.time, "time", _future_time)
     assert store.claim("owner-b") is True
+
+
+def test_claim_ttl_is_short() -> None:
+    import tq.orchestrator as orchestrator_mod
+
+    assert orchestrator_mod.CLAIM_TTL_SECONDS <= 120

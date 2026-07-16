@@ -1,9 +1,10 @@
-"""Textual TUI for the experiment queue.
+"""Textual TUI for tq.
 
 Two views, switchable with 1/2 or Tab:
   1  Queue view    - tasks grouped into RUNNING / QUEUED / COMPLETED sections,
-                     plus a recent-orchestrator-activity panel at the bottom
-  2  Projects view - registered projects: name, directory, repo
+                     plus orchestrator health + a recent-activity panel
+  2  Projects view - registered projects: name, directory, repo, bound
+                     pane, and that pane's live status
 
 Queue view keybindings:
   a         add a new task
@@ -35,10 +36,11 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 
-from expqueue.config import ConfigStore
-from expqueue.orchestrator import OrchestratorStore
-from expqueue.projects import ProjectStore
-from expqueue.store import QueueStore, STATUSES, Task
+from tq.config import ConfigStore
+from tq.orchestrator import OrchestratorStore
+from tq.panes import surface_activity, surface_exists
+from tq.projects import ProjectStore
+from tq.store import QueueStore, STATUSES, Task
 
 STATUS_ICON = {
     "queued": "⏳",
@@ -107,8 +109,8 @@ class InputModal(ModalScreen[str | None]):
             self.dismiss(None)
 
 
-class ExpQueueApp(App):
-    TITLE = "Experiment Queue"
+class TqApp(App):
+    TITLE = "tq"
 
     CSS = """
     Screen {
@@ -163,6 +165,17 @@ class ExpQueueApp(App):
         self.orchestrator_store = OrchestratorStore()
         self._rows: list[Task] = []
         self._header_keys: set[str] = set()
+
+    def _orchestrator_health(self) -> str:
+        config = self.config_store.load()
+        ws = config.orchestrator_workspace_ref
+        surf = config.orchestrator_surface_ref
+        if not ws or not surf:
+            return "orchestrator: not set up"
+        if not surface_exists(ws, surf):
+            return "orchestrator: not running"
+        activity = surface_activity(ws, surf) or "unknown"
+        return f"orchestrator: ● {activity} ({ws}/{surf})"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -386,13 +399,14 @@ class ExpQueueApp(App):
     def refresh_orchestrator_panel(self) -> None:
         panel = self.query_one("#orchestrator-panel", Static)
         events = self.orchestrator_store.recent(limit=5)
+        lines = [self._orchestrator_health(), ""]
         if not events:
-            panel.update("orchestrator: (no activity logged)")
-            return
-        lines = ["orchestrator activity:"]
-        for e in events:
-            when = time.strftime("%H:%M:%S", time.localtime(e.ts))
-            lines.append(f"  [{when}] {e.message}")
+            lines.append("(no activity logged)")
+        else:
+            lines.append("recent activity:")
+            for e in events:
+                when = time.strftime("%H:%M:%S", time.localtime(e.ts))
+                lines.append(f"  [{when}] {e.message}")
         panel.update("\n".join(lines))
 
     # -- projects view ----------------------------------------------------
@@ -408,9 +422,18 @@ class ExpQueueApp(App):
                 selected_key = None
 
         table.clear(columns=True)
-        table.add_columns("name", "directory", "repo")
+        table.add_columns("name", "directory", "repo", "pane", "status")
         for p in self.project_store.list():
-            table.add_row(p.name, p.directory, p.repo or "", key=p.name)
+            kind = p.repo or "(local)"
+            if p.workspace_ref and p.surface_ref:
+                pane = f"{p.workspace_ref}/{p.surface_ref}"
+                status = surface_activity(p.workspace_ref, p.surface_ref) or "unknown"
+                if not surface_exists(p.workspace_ref, p.surface_ref):
+                    status = "gone"
+            else:
+                pane = "(unbound)"
+                status = "-"
+            table.add_row(p.name, p.directory, kind, pane, status, key=p.name)
 
         if selected_key:
             for row_index in range(table.row_count):
@@ -421,7 +444,7 @@ class ExpQueueApp(App):
 
 
 def main() -> None:
-    ExpQueueApp().run()
+    TqApp().run()
 
 
 if __name__ == "__main__":

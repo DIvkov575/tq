@@ -1,22 +1,22 @@
-"""CLI for agents to read/push/pop the experiment queue.
+"""CLI for agents to read/push/pop the task queue, and for the orchestrator
+to bind project panes and manage its own pane.
 
 Usage:
-  expqueue list [--status queued|in_progress|done|dropped] [--project NAME] [--json]
-  expqueue push "<title>" [--notes "<notes>"] [--project NAME]
-  expqueue pop [--project NAME] [--json]
-  expqueue done <id>
-  expqueue drop <id>
-  expqueue start <id>
-  expqueue rm <id>
-  expqueue edit <id> [--title "<title>"] [--notes "<notes>"] [--project NAME]
-  expqueue project add <name> <directory> [--repo <owner/name>] [--create-repo] [--init-dir]
-  expqueue project list [--json]
-  expqueue project panes <name> [--json]
-  expqueue project spawn <name> <prompt-file> [--title "<title>"]
-  expqueue orchestrator log "<message>"
-  expqueue orchestrator recent [--limit N] [--json]
-  expqueue orchestrator claim <owner> [--json]
-  expqueue orchestrator release <owner>
+  tq list [--status queued|in_progress|done|dropped] [--project NAME] [--json]
+  tq push "<title>" [--notes "<notes>"] [--project NAME]
+  tq pop [--project NAME] [--json]
+  tq done <id>
+  tq drop <id>
+  tq start <id>
+  tq rm <id>
+  tq edit <id> [--title "<title>"] [--notes "<notes>"] [--project NAME]
+  tq project add <name> <directory> [--repo <owner/name>] [--create-repo] [--init-dir]
+  tq project list [--json]
+  tq orchestrator log "<message>"
+  tq orchestrator recent [--limit N] [--json]
+  tq orchestrator claim <owner> [--json]
+  tq orchestrator release <owner>
+  tq orchestrator ensure <prompt-file>
 """
 
 from __future__ import annotations
@@ -25,10 +25,19 @@ import argparse
 import json
 import sys
 
-from expqueue.orchestrator import OrchestratorStore
-from expqueue.panes import C11Unavailable, list_project_workspaces, spawn_background_agent
-from expqueue.projects import ProjectStore, ensure_gh_repo
-from expqueue.store import QueueStore, STATUSES, Task
+from tq.config import ConfigStore
+from tq.orchestrator import OrchestratorStore
+from tq.panes import (
+    C11Unavailable,
+    bind_project_pane,
+    create_surface,
+    ensure_shared_workspace,
+    first_pane_ref,
+    launch_agent_in_surface,
+    surface_exists,
+)
+from tq.projects import ProjectStore, ensure_gh_repo
+from tq.store import QueueStore, STATUSES, Task
 
 
 def _print_task(t: Task) -> None:
@@ -128,44 +137,70 @@ def cmd_project_list(args: argparse.Namespace) -> None:
         print(f"[{p.name}] dir={p.directory} repo={p.repo or '-'}")
 
 
-def cmd_project_panes(args: argparse.Namespace) -> None:
+def cmd_project_bind(args: argparse.Namespace) -> None:
+    config_store = ConfigStore()
     pstore = ProjectStore()
     project = pstore.get(args.name)
     if project is None:
         print(f"no project named {args.name}", file=sys.stderr)
         sys.exit(1)
-    try:
-        workspaces = list_project_workspaces(project.directory)
-    except C11Unavailable as exc:
-        print(f"c11 unavailable: {exc}", file=sys.stderr)
+    if project.workspace_ref and project.surface_ref:
+        print(
+            f"already bound: {project.workspace_ref}/{project.surface_ref}", file=sys.stderr
+        )
         sys.exit(1)
-    if args.json:
-        print(json.dumps([w.to_dict() for w in workspaces], indent=2))
-        return
-    if not workspaces:
-        print(f"(no c11 panes found under {project.directory})")
-        return
-    for w in workspaces:
-        print(f"[{w.workspace_ref}] {w.title} — {w.directory}")
-        for s in w.surfaces:
-            activity = s.activity or "unknown"
-            print(f"    {s.ref} ({activity}) {s.title}")
 
+    config = config_store.load()
+    shared_ref = ensure_shared_workspace(config.shared_workspace_ref)
+    if shared_ref != config.shared_workspace_ref:
+        config_store.set_shared_workspace_ref(shared_ref)
 
-def cmd_project_spawn(args: argparse.Namespace) -> None:
-    pstore = ProjectStore()
-    project = pstore.get(args.name)
-    if project is None:
-        print(f"no project named {args.name}", file=sys.stderr)
+    pane_ref = first_pane_ref(shared_ref)
+    if pane_ref is None:
+        print(f"shared workspace {shared_ref} has no pane to add a surface to", file=sys.stderr)
         sys.exit(1)
+
     try:
-        workspace_ref, surface_ref = spawn_background_agent(
-            project.directory, args.prompt_file, title=args.title
+        workspace_ref, surface_ref = bind_project_pane(
+            shared_ref, pane_ref, project.directory, args.prompt_file
         )
     except C11Unavailable as exc:
-        print(f"spawn failed: {exc}", file=sys.stderr)
+        print(f"bind failed: {exc}", file=sys.stderr)
         sys.exit(1)
-    print(f"spawned agent in {workspace_ref}/{surface_ref}")
+
+    pstore.bind(args.name, workspace_ref, surface_ref)
+    print(f"bound {args.name} -> {workspace_ref}/{surface_ref}")
+
+
+def cmd_ensure_orchestrator(args: argparse.Namespace) -> None:
+    config_store = ConfigStore()
+    config = config_store.load()
+
+    if config.orchestrator_workspace_ref and config.orchestrator_surface_ref:
+        if surface_exists(config.orchestrator_workspace_ref, config.orchestrator_surface_ref):
+            print(
+                f"alive: {config.orchestrator_workspace_ref}/{config.orchestrator_surface_ref}"
+            )
+            return
+
+    shared_ref = ensure_shared_workspace(config.shared_workspace_ref)
+    if shared_ref != config.shared_workspace_ref:
+        config_store.set_shared_workspace_ref(shared_ref)
+
+    pane_ref = first_pane_ref(shared_ref)
+    if pane_ref is None:
+        print(f"shared workspace {shared_ref} has no pane to add a surface to", file=sys.stderr)
+        sys.exit(1)
+
+    surface_ref = create_surface(shared_ref, pane_ref)
+    try:
+        launch_agent_in_surface(shared_ref, surface_ref, ".", args.prompt_file)
+    except C11Unavailable as exc:
+        print(f"orchestrator launch failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    config_store.set_orchestrator_pane(shared_ref, surface_ref)
+    print(f"spawned: {shared_ref}/{surface_ref}")
 
 
 def cmd_orchestrator_log(args: argparse.Namespace) -> None:
@@ -208,7 +243,7 @@ def cmd_orchestrator_release(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="expqueue")
+    p = argparse.ArgumentParser(prog="tq")
     sub = p.add_subparsers(dest="command", required=True)
 
     p_list = sub.add_parser("list", help="list tasks")
@@ -274,20 +309,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_list.add_argument("--json", action="store_true")
     p_project_list.set_defaults(func=lambda store, args: cmd_project_list(args))
 
-    p_project_panes = project_sub.add_parser(
-        "panes", help="list c11 workspaces/panes whose cwd is under a project's directory"
+    p_project_bind = project_sub.add_parser(
+        "bind", help="create a pane for a project in the shared workspace and launch its first agent"
     )
-    p_project_panes.add_argument("name")
-    p_project_panes.add_argument("--json", action="store_true")
-    p_project_panes.set_defaults(func=lambda store, args: cmd_project_panes(args))
-
-    p_project_spawn = project_sub.add_parser(
-        "spawn", help="spawn a fresh c11 workspace and launch an agent into it"
-    )
-    p_project_spawn.add_argument("name")
-    p_project_spawn.add_argument("prompt_file")
-    p_project_spawn.add_argument("--title", default=None)
-    p_project_spawn.set_defaults(func=lambda store, args: cmd_project_spawn(args))
+    p_project_bind.add_argument("name")
+    p_project_bind.add_argument("prompt_file", help="prompt file for the project's first task")
+    p_project_bind.set_defaults(func=lambda store, args: cmd_project_bind(args))
 
     p_orchestrator = sub.add_parser(
         "orchestrator", help="orchestrator activity log and singleton run-slot claim"
@@ -315,6 +342,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_orch_release.add_argument("owner")
     p_orch_release.set_defaults(func=lambda store, args: cmd_orchestrator_release(args))
+
+    p_orch_ensure = orchestrator_sub.add_parser(
+        "ensure", help="ensure the orchestrator's pane is alive, spawning it if not"
+    )
+    p_orch_ensure.add_argument("prompt_file", help="prompt file to launch the orchestrator with")
+    p_orch_ensure.set_defaults(func=lambda store, args: cmd_ensure_orchestrator(args))
 
     return p
 
