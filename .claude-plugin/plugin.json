@@ -1,0 +1,5 @@
+{
+  "name": "tq",
+  "description": "Per-project task queues with a held state (Rust CLI + ratatui TUI), plus tqctl/tqctl-restricted skills for full vs. held-locked agent access",
+  "version": "0.1.0"
+}
