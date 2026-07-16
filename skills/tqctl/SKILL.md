@@ -1,6 +1,6 @@
 ---
 name: tqctl
-description: Use when you need full access to the tq per-project task queues — pushing/editing/removing tasks, and moving tasks through every state transition including releasing a task out of held. This is the unrestricted CLI; use tqctl-restricted instead if you should not be able to unhold tasks yourself.
+description: Use when you need full access to the tq per-project task queues — pushing/editing/removing tasks, moving tasks through every state transition including releasing a task out of held, or checking whether the current session's directory has a registered tq queue and what's in it. This is the unrestricted CLI; use tqctl-restricted instead if you should not be able to unhold tasks yourself.
 ---
 
 # tqctl — full-access tq CLI
@@ -44,6 +44,32 @@ tqctl project list [--json]
 `--project` defaults to `_unassigned` on every task command. Projects must
 be registered with `project add` before tasks can target them; `_unassigned`
 is implicit and never appears in `project list`.
+
+## Checking if the current session's directory has a queue
+
+If you want to know whether the project you're working in right now has a
+tq queue, match your session's current working directory against the
+`directory` field of `tqctl project list --json` — exact match, not a
+prefix/subdirectory match.
+
+```
+tqctl project list --json
+```
+
+If your cwd matches a registered project's `directory`, that project's
+name is what you pass as `--project` everywhere else:
+
+```
+tqctl list --project <name> --status queued
+```
+
+Only look at `queued` tasks this way — `running`/`held`/`completed` aren't
+part of this check. If your cwd doesn't match any registered project,
+there's no queue for this directory; don't fall back to `_unassigned`,
+that lane isn't tied to any specific directory.
+
+**Never push a task as part of this check.** Only look — `push`/`edit`/
+`rm`/state transitions happen only when the user explicitly asks for them.
 
 ## Notes
 

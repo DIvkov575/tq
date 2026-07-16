@@ -36,6 +36,14 @@ tqctl-restricted project add <name> <directory>
 tqctl-restricted project list [--json]
 ```
 
+## Checking if the current session's directory has a queue
+
+Same as `tqctl` — see that skill's "Checking if the current session's
+directory has a queue" section. Match your cwd against `tqctl-restricted
+project list --json`'s `directory` field (exact match), then list only
+`queued` tasks for that project. Never push/edit/rm/transition a task
+unless the user explicitly asks.
+
 ## When you hit a held task you need released
 
 If your work needs a task un-held and you're using this restricted CLI,
