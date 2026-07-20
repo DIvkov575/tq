@@ -67,7 +67,9 @@ has full access — the held-locked restriction only applies to
 `tqctl-restricted`.
 
 Keys: `a` add task, `e` edit title, `s` start, `c` complete, `H` hold,
-`r` release, `R` requeue, `d` delete, `n` register a new project, `q` quit.
+`r` release, `R` requeue, `d` delete, `n` register a new project, `?`
+show all keybindings, `q` quit. The status bar at the bottom always shows
+the keys usable right now for the focused column.
 
 ## Tests
 

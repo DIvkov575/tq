@@ -31,7 +31,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_columns(frame, app, root[1]);
     draw_status_bar(frame, app, root[2]);
 
-    if app.input.active {
+    if app.help_open {
+        draw_help_overlay(frame);
+    } else if app.input.active {
         draw_input_modal(frame, app);
     }
 }
@@ -153,6 +155,41 @@ fn modal_height_for(text: &str, width: u16) -> u16 {
     lines.max(1).min(MAX_INPUT_MODAL_LINES)
 }
 
+fn help_overlay_text() -> String {
+    [
+        "Navigate",
+        "  h/l · ←/→   move column",
+        "  j/k · ↑/↓   move row",
+        "  J/K         switch project",
+        "",
+        "Task actions",
+        "  a  add       e  edit",
+        "  s  start     c  complete",
+        "  H  hold      r  release",
+        "  R  requeue   d  delete",
+        "",
+        "Project",
+        "  n  new project",
+        "",
+        "Quit",
+        "  q  quit",
+        "",
+        "? or Esc to close",
+    ]
+    .join("\n")
+}
+
+fn draw_help_overlay(frame: &mut Frame) {
+    let area = centered_rect(50, 14, frame.area());
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title(" Keybindings ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let text = Paragraph::new(help_overlay_text()).block(block);
+    frame.render_widget(text, area);
+}
+
 fn draw_input_modal(frame: &mut Frame, app: &App) {
     const MODAL_WIDTH_PCT: u16 = 60;
     // centered_rect's horizontal split (which determines width) only depends
@@ -207,7 +244,7 @@ fn centered_rect(width_pct: u16, height: u16, area: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::InputState;
+    use crate::app::{InputPurpose, InputState};
     use tq_core::{Status, Task};
 
     fn test_app(lane_tasks: Vec<Task>, column_idx: usize) -> App {
@@ -330,5 +367,42 @@ mod tests {
         // 368 chars wraps to exactly 8 lines; the cap must not kick in early.
         let text = "x".repeat(368);
         assert_eq!(modal_height_for(&text, 46), 8);
+    }
+
+    #[test]
+    fn help_overlay_lists_every_key() {
+        let text = help_overlay_text();
+        for key in [
+            "h/l", "j/k", "J/K", "a", "e", "s", "c", "H", "r", "R", "d", "n", "q",
+        ] {
+            assert!(text.contains(key), "missing key: {key}");
+        }
+    }
+
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn draw_does_not_panic_with_long_input_text() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = test_app(vec![], 0);
+        let mut app = app;
+        app.input = InputState {
+            active: true,
+            prompt: "New task title:".to_string(),
+            buffer: "x".repeat(200),
+            purpose: InputPurpose::AddTask,
+        };
+        terminal.draw(|f| draw(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn draw_does_not_panic_with_help_open() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = test_app(vec![], 0);
+        app.help_open = true;
+        terminal.draw(|f| draw(f, &app)).unwrap();
     }
 }

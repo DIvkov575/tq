@@ -36,7 +36,9 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                if app.input.active {
+                if app.help_open {
+                    handle_help_key(app, key.code);
+                } else if app.input.active {
                     handle_input_key(app, key.code);
                 } else {
                     handle_normal_key(app, key.code);
@@ -62,6 +64,13 @@ fn handle_input_key(app: &mut App, code: KeyCode) {
     }
 }
 
+fn handle_help_key(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Char('?') | KeyCode::Esc => app.toggle_help(),
+        _ => {}
+    }
+}
+
 fn handle_normal_key(app: &mut App, code: KeyCode) {
     match code {
         KeyCode::Char('q') => app.should_quit = true,
@@ -80,6 +89,7 @@ fn handle_normal_key(app: &mut App, code: KeyCode) {
         KeyCode::Char('R') => app.act_requeue(),
         KeyCode::Char('d') => app.act_delete(),
         KeyCode::Char('n') => app.open_new_project(),
+        KeyCode::Char('?') => app.toggle_help(),
         _ => {}
     }
 }
