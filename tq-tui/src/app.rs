@@ -44,6 +44,7 @@ pub struct App {
     pub status_message: String,
     pub input: InputState,
     pub pending_project_name: String,
+    pub help_open: bool,
     pub should_quit: bool,
 }
 
@@ -59,6 +60,7 @@ impl App {
             status_message: String::new(),
             input: InputState::default(),
             pending_project_name: String::new(),
+            help_open: false,
             should_quit: false,
         };
         app.refresh()?;
