@@ -44,6 +44,7 @@ pub struct App {
     pub status_message: String,
     pub input: InputState,
     pub pending_project_name: String,
+    pub help_open: bool,
     pub should_quit: bool,
 }
 
@@ -59,6 +60,7 @@ impl App {
             status_message: String::new(),
             input: InputState::default(),
             pending_project_name: String::new(),
+            help_open: false,
             should_quit: false,
         };
         app.refresh()?;
@@ -173,6 +175,10 @@ impl App {
         self.input = InputState::default();
     }
 
+    pub fn toggle_help(&mut self) {
+        self.help_open = !self.help_open;
+    }
+
     pub fn submit_input(&mut self) {
         let purpose = self.input.purpose;
         let value = self.input.buffer.trim().to_string();
@@ -269,5 +275,35 @@ impl App {
         }
         let _ = self.refresh();
         self.clamp_rows();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_app() -> App {
+        App {
+            lanes: vec!["_unassigned".to_string()],
+            lane_idx: 0,
+            tasks: Vec::new(),
+            column_idx: 0,
+            row_idx: [0; 4],
+            status_message: String::new(),
+            input: InputState::default(),
+            pending_project_name: String::new(),
+            help_open: false,
+            should_quit: false,
+        }
+    }
+
+    #[test]
+    fn toggle_help_flips_state() {
+        let mut app = minimal_app();
+        assert!(!app.help_open);
+        app.toggle_help();
+        assert!(app.help_open);
+        app.toggle_help();
+        assert!(!app.help_open);
     }
 }
