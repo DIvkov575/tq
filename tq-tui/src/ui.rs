@@ -152,7 +152,7 @@ fn modal_height_for(text: &str, width: u16) -> u16 {
     let lines = Paragraph::new(text)
         .wrap(Wrap { trim: false })
         .line_count(width) as u16;
-    lines.max(1).min(MAX_INPUT_MODAL_LINES)
+    lines.clamp(1, MAX_INPUT_MODAL_LINES)
 }
 
 fn help_overlay_text() -> String {
@@ -180,14 +180,16 @@ fn help_overlay_text() -> String {
 }
 
 fn draw_help_overlay(frame: &mut Frame) {
-    let area = centered_rect(50, 14, frame.area());
+    let text = help_overlay_text();
+    let height = text.lines().count() as u16;
+    let area = centered_rect(50, height, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(" Keybindings ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
-    let text = Paragraph::new(help_overlay_text()).block(block);
-    frame.render_widget(text, area);
+    let paragraph = Paragraph::new(text).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 fn draw_input_modal(frame: &mut Frame, app: &App) {
@@ -404,5 +406,24 @@ mod tests {
         let mut app = test_app(vec![], 0);
         app.help_open = true;
         terminal.draw(|f| draw(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn help_overlay_renders_without_clipping_last_line() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = test_app(vec![], 0);
+        app.help_open = true;
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(
+            rendered.contains("close"),
+            "expected the close hint to be visible in the rendered buffer, got: {rendered}"
+        );
     }
 }
