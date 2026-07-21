@@ -450,7 +450,9 @@ mod tests {
         let buffer = terminal.backend().buffer();
         // The unselected lane ("proj-b", lane_idx stays 0 so "proj-a" is selected)
         // must render with cyan foreground when the lane bar has focus.
-        let found_cyan_unselected = buffer.content().iter().any(|cell| {
+        // Row 0 is the lane bar (draw's root layout puts it at Constraint::Length(1), y=0).
+        let found_cyan_unselected = (0..buffer.area.width).any(|x| {
+            let cell = &buffer[(x, 0)];
             cell.symbol().contains('b') && cell.fg == Color::Cyan
         });
         assert!(found_cyan_unselected, "expected unselected lane text to be cyan when lane bar is focused");
@@ -464,7 +466,9 @@ mod tests {
         app.lanes = vec!["proj-a".to_string(), "proj-b".to_string()];
         terminal.draw(|f| draw(f, &app)).unwrap();
         let buffer = terminal.backend().buffer();
-        let found_gray_unselected = buffer.content().iter().any(|cell| {
+        // Row 0 is the lane bar (draw's root layout puts it at Constraint::Length(1), y=0).
+        let found_gray_unselected = (0..buffer.area.width).any(|x| {
+            let cell = &buffer[(x, 0)];
             cell.symbol().contains('b') && cell.fg == Color::Gray
         });
         assert!(found_gray_unselected, "expected unselected lane text to be gray when board is focused (default)");
