@@ -38,6 +38,8 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
                 }
                 if app.help_open {
                     handle_help_key(app, key.code);
+                } else if app.detail_open {
+                    handle_detail_key(app, key.code);
                 } else if app.input.active {
                     handle_input_key(app, key.code);
                 } else {
@@ -71,6 +73,13 @@ fn handle_help_key(app: &mut App, code: KeyCode) {
     }
 }
 
+fn handle_detail_key(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Enter | KeyCode::Esc => app.close_task_detail(),
+        _ => {}
+    }
+}
+
 fn handle_normal_key(app: &mut App, code: KeyCode) {
     match code {
         KeyCode::Char('q') => app.should_quit = true,
@@ -90,6 +99,7 @@ fn handle_normal_key(app: &mut App, code: KeyCode) {
         KeyCode::Char('d') => app.act_delete(),
         KeyCode::Char('n') => app.open_new_project(),
         KeyCode::Char('?') => app.toggle_help(),
+        KeyCode::Enter => app.open_task_detail(),
         _ => {}
     }
 }

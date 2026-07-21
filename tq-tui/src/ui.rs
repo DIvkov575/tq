@@ -33,6 +33,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if app.help_open {
         draw_help_overlay(frame);
+    } else if app.detail_open {
+        draw_task_detail(frame, app);
     } else if app.input.active {
         draw_input_modal(frame, app);
     }
@@ -100,6 +102,9 @@ fn contextual_help(app: &App) -> String {
     if app.input.active {
         return "Enter submit  Esc cancel".to_string();
     }
+    if app.detail_open {
+        return "Enter/Esc to close".to_string();
+    }
 
     let mut parts = vec!["j/k row".to_string(), "h/l col".to_string(), "J/K project".to_string()];
 
@@ -161,6 +166,7 @@ fn help_overlay_text() -> String {
         "  h/l · ←/→   move column",
         "  j/k · ↑/↓   move row",
         "  J/K         switch project",
+        "  Enter       view task detail",
         "",
         "Task actions",
         "  a  add       e  edit",
@@ -189,6 +195,45 @@ fn draw_help_overlay(frame: &mut Frame) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
     let paragraph = Paragraph::new(text).block(block);
+    frame.render_widget(paragraph, area);
+}
+
+fn draw_task_detail(frame: &mut Frame, app: &App) {
+    let Some(task) = app.selected_task() else {
+        return;
+    };
+
+    let mut body = task.title.clone();
+    if !task.notes.is_empty() {
+        body.push_str("\n\n");
+        body.push_str("notes: ");
+        body.push_str(&task.notes);
+    }
+    body.push_str("\n\nEnter or Esc to close");
+
+    const MODAL_WIDTH_PCT: u16 = 60;
+    let probe = centered_rect(MODAL_WIDTH_PCT, 1, frame.area());
+    let inner_width = probe.width.saturating_sub(2);
+
+    let height = modal_height_for(&body, inner_width);
+    let area = centered_rect(MODAL_WIDTH_PCT, height, frame.area());
+    frame.render_widget(Clear, area);
+
+    let title = format!(" {} task ", column_label(task.status));
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let total_lines = Paragraph::new(body.as_str())
+        .wrap(Wrap { trim: false })
+        .line_count(inner_width) as u16;
+    let scroll_y = total_lines.saturating_sub(height);
+
+    let paragraph = Paragraph::new(body)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll_y, 0));
     frame.render_widget(paragraph, area);
 }
 
@@ -260,6 +305,7 @@ mod tests {
             input: InputState::default(),
             pending_project_name: String::new(),
             help_open: false,
+            detail_open: false,
             should_quit: false,
         }
     }
@@ -425,5 +471,33 @@ mod tests {
             rendered.contains("close"),
             "expected the close hint to be visible in the rendered buffer, got: {rendered}"
         );
+    }
+
+    #[test]
+    fn draw_task_detail_shows_title_and_notes() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut task = Task::new("a very specific task title", "some helpful notes");
+        task.status = Status::Queued;
+        let mut app = test_app(vec![task], 0);
+        app.detail_open = true;
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(rendered.contains("a very specific"), "expected title to be visible, got: {rendered}");
+        assert!(rendered.contains("some helpful"), "expected notes to be visible, got: {rendered}");
+    }
+
+    #[test]
+    fn draw_task_detail_omits_notes_line_when_empty() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let task = Task::new("bare title", "");
+        let mut app = test_app(vec![task], 0);
+        app.detail_open = true;
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(!rendered.contains("notes:"), "expected no notes line for empty notes, got: {rendered}");
     }
 }
