@@ -35,6 +35,20 @@ pub enum InputPurpose {
     NewProjectDir { name_captured: bool },
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    #[default]
+    Board,
+    LaneBar,
+}
+
+#[derive(Clone)]
+pub struct TaskDetail {
+    pub title: String,
+    pub notes: String,
+    pub status: Status,
+}
+
 pub struct App {
     pub lanes: Vec<String>,
     pub lane_idx: usize,
@@ -45,6 +59,8 @@ pub struct App {
     pub input: InputState,
     pub pending_project_name: String,
     pub help_open: bool,
+    pub detail: Option<TaskDetail>,
+    pub focus: Focus,
     pub should_quit: bool,
 }
 
@@ -61,6 +77,8 @@ impl App {
             input: InputState::default(),
             pending_project_name: String::new(),
             help_open: false,
+            detail: None,
+            focus: Focus::Board,
             should_quit: false,
         };
         app.refresh()?;
@@ -179,6 +197,27 @@ impl App {
         self.help_open = !self.help_open;
     }
 
+    pub fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Board => Focus::LaneBar,
+            Focus::LaneBar => Focus::Board,
+        };
+    }
+
+    pub fn open_task_detail(&mut self) {
+        if let Some(task) = self.selected_task() {
+            self.detail = Some(TaskDetail {
+                title: task.title.clone(),
+                notes: task.notes.clone(),
+                status: task.status,
+            });
+        }
+    }
+
+    pub fn close_task_detail(&mut self) {
+        self.detail = None;
+    }
+
     pub fn submit_input(&mut self) {
         let purpose = self.input.purpose;
         let value = self.input.buffer.trim().to_string();
@@ -293,6 +332,8 @@ mod tests {
             input: InputState::default(),
             pending_project_name: String::new(),
             help_open: false,
+            detail: None,
+            focus: Focus::Board,
             should_quit: false,
         }
     }
@@ -305,5 +346,47 @@ mod tests {
         assert!(app.help_open);
         app.toggle_help();
         assert!(!app.help_open);
+    }
+
+    fn app_with_task(status: Status) -> App {
+        let mut task = Task::new("t", "");
+        task.status = status;
+        let mut app = minimal_app();
+        app.tasks = vec![task];
+        app
+    }
+
+    #[test]
+    fn open_task_detail_opens_when_task_selected() {
+        let mut app = app_with_task(Status::Queued);
+        assert!(app.detail.is_none());
+        app.open_task_detail();
+        assert!(app.detail.is_some());
+    }
+
+    #[test]
+    fn open_task_detail_noop_when_column_empty() {
+        let mut app = minimal_app();
+        app.open_task_detail();
+        assert!(app.detail.is_none());
+    }
+
+    #[test]
+    fn close_task_detail_closes() {
+        let mut app = app_with_task(Status::Queued);
+        app.open_task_detail();
+        assert!(app.detail.is_some());
+        app.close_task_detail();
+        assert!(app.detail.is_none());
+    }
+
+    #[test]
+    fn toggle_focus_flips_between_board_and_lane_bar() {
+        let mut app = minimal_app();
+        assert_eq!(app.focus, Focus::Board);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::LaneBar);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::Board);
     }
 }

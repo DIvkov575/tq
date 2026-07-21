@@ -10,7 +10,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScree
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use app::App;
+use app::{App, Focus};
 
 fn main() -> io::Result<()> {
     enable_raw_mode()?;
@@ -38,6 +38,8 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
                 }
                 if app.help_open {
                     handle_help_key(app, key.code);
+                } else if app.detail.is_some() {
+                    handle_detail_key(app, key.code);
                 } else if app.input.active {
                     handle_input_key(app, key.code);
                 } else {
@@ -71,13 +73,40 @@ fn handle_help_key(app: &mut App, code: KeyCode) {
     }
 }
 
+fn handle_detail_key(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Enter | KeyCode::Esc => app.close_task_detail(),
+        _ => {}
+    }
+}
+
 fn handle_normal_key(app: &mut App, code: KeyCode) {
     match code {
+        KeyCode::Tab => app.toggle_focus(),
+        KeyCode::Char('h') | KeyCode::Left => match app.focus {
+            Focus::Board => app.move_column(-1),
+            Focus::LaneBar => app.prev_lane(),
+        },
+        KeyCode::Char('l') | KeyCode::Right => match app.focus {
+            Focus::Board => app.move_column(1),
+            Focus::LaneBar => app.next_lane(),
+        },
+        KeyCode::Char('j') | KeyCode::Down => {
+            if app.focus == Focus::Board {
+                app.move_row(1);
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            if app.focus == Focus::Board {
+                app.move_row(-1);
+            }
+        }
+        KeyCode::Enter => match app.focus {
+            Focus::Board => app.open_task_detail(),
+            Focus::LaneBar => app.focus = Focus::Board,
+        },
+        KeyCode::Esc if app.focus == Focus::LaneBar => app.focus = Focus::Board,
         KeyCode::Char('q') => app.should_quit = true,
-        KeyCode::Char('j') | KeyCode::Down => app.move_row(1),
-        KeyCode::Char('k') | KeyCode::Up => app.move_row(-1),
-        KeyCode::Char('l') | KeyCode::Right => app.move_column(1),
-        KeyCode::Char('h') | KeyCode::Left => app.move_column(-1),
         KeyCode::Char('J') => app.next_lane(),
         KeyCode::Char('K') => app.prev_lane(),
         KeyCode::Char('a') => app.open_add_task(),

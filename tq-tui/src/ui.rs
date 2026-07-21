@@ -6,7 +6,7 @@ use ratatui::Frame;
 
 use tq_core::Status;
 
-use crate::app::{column_label, App, COLUMNS};
+use crate::app::{column_label, App, Focus, COLUMNS};
 
 fn status_color(idx: usize) -> Color {
     match idx {
@@ -33,21 +33,23 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if app.help_open {
         draw_help_overlay(frame);
+    } else if app.detail.is_some() {
+        draw_task_detail(frame, app);
     } else if app.input.active {
         draw_input_modal(frame, app);
     }
 }
 
 fn draw_lane_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let lane_bar_focused = app.focus == Focus::LaneBar;
     let mut spans = Vec::new();
     for (i, lane) in app.lanes.iter().enumerate() {
         let style = if i == app.lane_idx {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
+            let bg = if lane_bar_focused { Color::Green } else { Color::Cyan };
+            Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Gray)
+            let fg = if lane_bar_focused { Color::Cyan } else { Color::Gray };
+            Style::default().fg(fg)
         };
         spans.push(Span::styled(format!(" {lane} "), style));
     }
@@ -100,6 +102,12 @@ fn contextual_help(app: &App) -> String {
     if app.input.active {
         return "Enter submit  Esc cancel".to_string();
     }
+    if app.detail.is_some() {
+        return "Enter/Esc to close".to_string();
+    }
+    if app.focus == Focus::LaneBar {
+        return "h/l · ←/→ switch project  Enter/Esc back to board  q quit".to_string();
+    }
 
     let mut parts = vec!["j/k row".to_string(), "h/l col".to_string(), "J/K project".to_string()];
 
@@ -146,13 +154,17 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 /// Max modal height in text lines, so a very long pasted title can't fill the screen.
 const MAX_INPUT_MODAL_LINES: u16 = 8;
 
+/// Number of wrapped lines `text` occupies at `width` columns, with no cap applied.
+fn wrapped_line_count(text: &str, width: u16) -> u16 {
+    Paragraph::new(text)
+        .wrap(Wrap { trim: false })
+        .line_count(width) as u16
+}
+
 /// Number of wrapped lines `text` occupies at `width` columns, clamped to
 /// `[1, MAX_INPUT_MODAL_LINES]`.
 fn modal_height_for(text: &str, width: u16) -> u16 {
-    let lines = Paragraph::new(text)
-        .wrap(Wrap { trim: false })
-        .line_count(width) as u16;
-    lines.clamp(1, MAX_INPUT_MODAL_LINES)
+    wrapped_line_count(text, width).clamp(1, MAX_INPUT_MODAL_LINES)
 }
 
 fn help_overlay_text() -> String {
@@ -161,6 +173,8 @@ fn help_overlay_text() -> String {
         "  h/l · ←/→   move column",
         "  j/k · ↑/↓   move row",
         "  J/K         switch project",
+        "  Tab         focus project bar",
+        "  Enter       view task detail",
         "",
         "Task actions",
         "  a  add       e  edit",
@@ -189,6 +203,61 @@ fn draw_help_overlay(frame: &mut Frame) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
     let paragraph = Paragraph::new(text).block(block);
+    frame.render_widget(paragraph, area);
+}
+
+fn draw_task_detail(frame: &mut Frame, app: &App) {
+    let Some(detail) = &app.detail else {
+        return;
+    };
+
+    const MODAL_WIDTH_PCT: u16 = 60;
+    let probe = centered_rect(MODAL_WIDTH_PCT, 1, frame.area());
+    let inner_width = probe.width.saturating_sub(2).max(1);
+
+    // Detail is read-only (no cursor to keep on-screen), so it can use a much
+    // taller cap than the input modal — bounded by the terminal's own height
+    // rather than a small fixed constant.
+    let max_lines = frame.area().height.saturating_sub(6).clamp(3, 30);
+
+    let mut body = detail.title.clone();
+    if !detail.notes.is_empty() {
+        let mut notes = detail.notes.clone();
+        // Rough character budget for the notes portion so a truncation
+        // marker stays within the visible area for very long notes, instead
+        // of silently scrolling off with no indication (the exact word-wrap
+        // point isn't simulated here, so this is an approximation).
+        let title_lines = wrapped_line_count(&detail.title, inner_width);
+        let budget_lines = max_lines.saturating_sub(title_lines).saturating_sub(2);
+        let budget_chars = (budget_lines as usize).saturating_mul(inner_width as usize);
+        const MARKER: &str = " … (truncated)";
+        if budget_chars > 0 && notes.chars().count() > budget_chars {
+            // Reserve room for the marker itself within the budget so
+            // appending it can't push the total back over budget_chars —
+            // otherwise the marker meant to signal truncation could itself
+            // be the part that gets clipped off.
+            let take = budget_chars.saturating_sub(MARKER.chars().count());
+            let mut truncated: String = notes.chars().take(take).collect();
+            truncated.push_str(MARKER);
+            notes = truncated;
+        }
+        body.push_str("\n\nnotes: ");
+        body.push_str(&notes);
+    }
+
+    let height = wrapped_line_count(&body, inner_width).clamp(1, max_lines);
+    let area = centered_rect(MODAL_WIDTH_PCT, height, frame.area());
+    frame.render_widget(Clear, area);
+
+    let title = format!(" {} task ", column_label(detail.status));
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(body)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, area);
 }
 
@@ -260,6 +329,8 @@ mod tests {
             input: InputState::default(),
             pending_project_name: String::new(),
             help_open: false,
+            detail: None,
+            focus: Focus::Board,
             should_quit: false,
         }
     }
@@ -336,6 +407,16 @@ mod tests {
     }
 
     #[test]
+    fn contextual_help_for_lane_bar_focus() {
+        let mut app = test_app(vec![], 0);
+        app.focus = crate::app::Focus::LaneBar;
+        let help = contextual_help(&app);
+        assert!(help.contains("switch project"));
+        assert!(help.contains("back to board"));
+        assert!(!help.contains("a add"));
+    }
+
+    #[test]
     fn modal_height_for_empty_text_is_one_line() {
         assert_eq!(modal_height_for("", 46), 1);
     }
@@ -385,6 +466,41 @@ mod tests {
     use ratatui::Terminal;
 
     #[test]
+    fn draw_lane_bar_uses_cyan_text_when_lane_bar_focused() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = test_app(vec![], 0);
+        app.lanes = vec!["proj-a".to_string(), "proj-b".to_string()];
+        app.focus = crate::app::Focus::LaneBar;
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        // The unselected lane ("proj-b", lane_idx stays 0 so "proj-a" is selected)
+        // must render with cyan foreground when the lane bar has focus.
+        // Row 0 is the lane bar (draw's root layout puts it at Constraint::Length(1), y=0).
+        let found_cyan_unselected = (0..buffer.area.width).any(|x| {
+            let cell = &buffer[(x, 0)];
+            cell.symbol().contains('b') && cell.fg == Color::Cyan
+        });
+        assert!(found_cyan_unselected, "expected unselected lane text to be cyan when lane bar is focused");
+    }
+
+    #[test]
+    fn draw_lane_bar_uses_gray_text_when_board_focused() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = test_app(vec![], 0);
+        app.lanes = vec!["proj-a".to_string(), "proj-b".to_string()];
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        // Row 0 is the lane bar (draw's root layout puts it at Constraint::Length(1), y=0).
+        let found_gray_unselected = (0..buffer.area.width).any(|x| {
+            let cell = &buffer[(x, 0)];
+            cell.symbol().contains('b') && cell.fg == Color::Gray
+        });
+        assert!(found_gray_unselected, "expected unselected lane text to be gray when board is focused (default)");
+    }
+
+    #[test]
     fn draw_does_not_panic_with_long_input_text() {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -425,5 +541,60 @@ mod tests {
             rendered.contains("close"),
             "expected the close hint to be visible in the rendered buffer, got: {rendered}"
         );
+    }
+
+    #[test]
+    fn draw_task_detail_shows_title_and_notes() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut task = Task::new("a very specific task title", "some helpful notes");
+        task.status = Status::Queued;
+        let mut app = test_app(vec![task], 0);
+        app.open_task_detail();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(rendered.contains("a very specific"), "expected title to be visible, got: {rendered}");
+        assert!(rendered.contains("some helpful"), "expected notes to be visible, got: {rendered}");
+    }
+
+    #[test]
+    fn draw_task_detail_omits_notes_line_when_empty() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let task = Task::new("bare title", "");
+        let mut app = test_app(vec![task], 0);
+        app.open_task_detail();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(!rendered.contains("notes:"), "expected no notes line for empty notes, got: {rendered}");
+    }
+
+    #[test]
+    fn draw_task_detail_truncates_very_long_notes_with_marker() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let long_notes = "n".repeat(5000);
+        let mut task = Task::new("short title", long_notes);
+        task.status = Status::Queued;
+        let mut app = test_app(vec![task], 0);
+        app.open_task_detail();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(rendered.contains("short title"), "expected title to remain visible, got: {rendered}");
+        assert!(rendered.contains("truncated"), "expected a truncation marker to be visible, got: {rendered}");
+    }
+
+    #[test]
+    fn draw_task_detail_does_not_panic_at_tiny_terminal() {
+        let backend = TestBackend::new(10, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut task = Task::new("a title", "some notes here that are moderately long for the test");
+        task.status = Status::Queued;
+        let mut app = test_app(vec![task], 0);
+        app.open_task_detail();
+        terminal.draw(|f| draw(f, &app)).unwrap();
     }
 }
