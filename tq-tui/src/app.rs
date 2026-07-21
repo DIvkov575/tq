@@ -35,6 +35,13 @@ pub enum InputPurpose {
     NewProjectDir { name_captured: bool },
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    #[default]
+    Board,
+    LaneBar,
+}
+
 #[derive(Clone)]
 pub struct TaskDetail {
     pub title: String,
@@ -53,6 +60,7 @@ pub struct App {
     pub pending_project_name: String,
     pub help_open: bool,
     pub detail: Option<TaskDetail>,
+    pub focus: Focus,
     pub should_quit: bool,
 }
 
@@ -70,6 +78,7 @@ impl App {
             pending_project_name: String::new(),
             help_open: false,
             detail: None,
+            focus: Focus::Board,
             should_quit: false,
         };
         app.refresh()?;
@@ -186,6 +195,13 @@ impl App {
 
     pub fn toggle_help(&mut self) {
         self.help_open = !self.help_open;
+    }
+
+    pub fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Board => Focus::LaneBar,
+            Focus::LaneBar => Focus::Board,
+        };
     }
 
     pub fn open_task_detail(&mut self) {
@@ -317,6 +333,7 @@ mod tests {
             pending_project_name: String::new(),
             help_open: false,
             detail: None,
+            focus: Focus::Board,
             should_quit: false,
         }
     }
@@ -361,5 +378,15 @@ mod tests {
         assert!(app.detail.is_some());
         app.close_task_detail();
         assert!(app.detail.is_none());
+    }
+
+    #[test]
+    fn toggle_focus_flips_between_board_and_lane_bar() {
+        let mut app = minimal_app();
+        assert_eq!(app.focus, Focus::Board);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::LaneBar);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::Board);
     }
 }

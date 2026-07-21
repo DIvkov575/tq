@@ -6,7 +6,7 @@ use ratatui::Frame;
 
 use tq_core::Status;
 
-use crate::app::{column_label, App, COLUMNS};
+use crate::app::{column_label, App, Focus, COLUMNS};
 
 fn status_color(idx: usize) -> Color {
     match idx {
@@ -41,15 +41,15 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 fn draw_lane_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let lane_bar_focused = app.focus == Focus::LaneBar;
     let mut spans = Vec::new();
     for (i, lane) in app.lanes.iter().enumerate() {
         let style = if i == app.lane_idx {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
+            let bg = if lane_bar_focused { Color::Green } else { Color::Cyan };
+            Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Gray)
+            let fg = if lane_bar_focused { Color::Cyan } else { Color::Gray };
+            Style::default().fg(fg)
         };
         spans.push(Span::styled(format!(" {lane} "), style));
     }
@@ -104,6 +104,9 @@ fn contextual_help(app: &App) -> String {
     }
     if app.detail.is_some() {
         return "Enter/Esc to close".to_string();
+    }
+    if app.focus == Focus::LaneBar {
+        return "h/l · ←/→ switch project  Enter/Esc back to board  q quit".to_string();
     }
 
     let mut parts = vec!["j/k row".to_string(), "h/l col".to_string(), "J/K project".to_string()];
@@ -166,6 +169,7 @@ fn help_overlay_text() -> String {
         "  h/l · ←/→   move column",
         "  j/k · ↑/↓   move row",
         "  J/K         switch project",
+        "  Tab         focus project bar",
         "  Enter       view task detail",
         "",
         "Task actions",
@@ -300,6 +304,7 @@ mod tests {
             pending_project_name: String::new(),
             help_open: false,
             detail: None,
+            focus: Focus::Board,
             should_quit: false,
         }
     }
@@ -376,6 +381,16 @@ mod tests {
     }
 
     #[test]
+    fn contextual_help_for_lane_bar_focus() {
+        let mut app = test_app(vec![], 0);
+        app.focus = crate::app::Focus::LaneBar;
+        let help = contextual_help(&app);
+        assert!(help.contains("switch project"));
+        assert!(help.contains("back to board"));
+        assert!(!help.contains("a add"));
+    }
+
+    #[test]
     fn modal_height_for_empty_text_is_one_line() {
         assert_eq!(modal_height_for("", 46), 1);
     }
@@ -423,6 +438,37 @@ mod tests {
 
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+
+    #[test]
+    fn draw_lane_bar_uses_cyan_text_when_lane_bar_focused() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = test_app(vec![], 0);
+        app.lanes = vec!["proj-a".to_string(), "proj-b".to_string()];
+        app.focus = crate::app::Focus::LaneBar;
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        // The unselected lane ("proj-b", lane_idx stays 0 so "proj-a" is selected)
+        // must render with cyan foreground when the lane bar has focus.
+        let found_cyan_unselected = buffer.content().iter().any(|cell| {
+            cell.symbol().contains('b') && cell.fg == Color::Cyan
+        });
+        assert!(found_cyan_unselected, "expected unselected lane text to be cyan when lane bar is focused");
+    }
+
+    #[test]
+    fn draw_lane_bar_uses_gray_text_when_board_focused() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = test_app(vec![], 0);
+        app.lanes = vec!["proj-a".to_string(), "proj-b".to_string()];
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let found_gray_unselected = buffer.content().iter().any(|cell| {
+            cell.symbol().contains('b') && cell.fg == Color::Gray
+        });
+        assert!(found_gray_unselected, "expected unselected lane text to be gray when board is focused (default)");
+    }
 
     #[test]
     fn draw_does_not_panic_with_long_input_text() {

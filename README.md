@@ -61,15 +61,17 @@ tqctl-tui
 ```
 
 `ratatui`-based board: a lane bar across the top (switch projects with
-`J`/`K`), four columns (QUEUED / RUNNING / HELD / COMPLETED) for the
-selected lane, navigable with `h`/`j`/`k`/`l` or arrow keys. The TUI always
-has full access — the held-locked restriction only applies to
-`tqctl-restricted`.
+`J`/`K`, or press `Tab` to move focus there and switch with `h`/`l`/arrows,
+`Enter` or `Esc` to return), four columns (QUEUED / RUNNING / HELD /
+COMPLETED) for the selected lane, navigable with `h`/`j`/`k`/`l` or arrow
+keys. The TUI always has full access — the held-locked restriction only
+applies to `tqctl-restricted`.
 
-Keys: `a` add task, `e` edit title, `s` start, `c` complete, `H` hold,
-`r` release, `R` requeue, `d` delete, `n` register a new project, `?`
-show all keybindings, `q` quit. The status bar at the bottom always shows
-the keys usable right now for the focused column.
+Keys: `Enter` view full task detail, `a` add task, `e` edit title, `s`
+start, `c` complete, `H` hold, `r` release, `R` requeue, `d` delete, `n`
+register a new project, `?` show all keybindings, `q` quit. The status bar
+at the bottom always shows the keys usable right now for the focused
+column or bar.
 
 ## Tests
 
