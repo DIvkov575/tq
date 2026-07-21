@@ -35,6 +35,13 @@ pub enum InputPurpose {
     NewProjectDir { name_captured: bool },
 }
 
+#[derive(Clone)]
+pub struct TaskDetail {
+    pub title: String,
+    pub notes: String,
+    pub status: Status,
+}
+
 pub struct App {
     pub lanes: Vec<String>,
     pub lane_idx: usize,
@@ -45,7 +52,7 @@ pub struct App {
     pub input: InputState,
     pub pending_project_name: String,
     pub help_open: bool,
-    pub detail_open: bool,
+    pub detail: Option<TaskDetail>,
     pub should_quit: bool,
 }
 
@@ -62,7 +69,7 @@ impl App {
             input: InputState::default(),
             pending_project_name: String::new(),
             help_open: false,
-            detail_open: false,
+            detail: None,
             should_quit: false,
         };
         app.refresh()?;
@@ -182,13 +189,17 @@ impl App {
     }
 
     pub fn open_task_detail(&mut self) {
-        if self.selected_task().is_some() {
-            self.detail_open = true;
+        if let Some(task) = self.selected_task() {
+            self.detail = Some(TaskDetail {
+                title: task.title.clone(),
+                notes: task.notes.clone(),
+                status: task.status,
+            });
         }
     }
 
     pub fn close_task_detail(&mut self) {
-        self.detail_open = false;
+        self.detail = None;
     }
 
     pub fn submit_input(&mut self) {
@@ -305,7 +316,7 @@ mod tests {
             input: InputState::default(),
             pending_project_name: String::new(),
             help_open: false,
-            detail_open: false,
+            detail: None,
             should_quit: false,
         }
     }
@@ -331,24 +342,24 @@ mod tests {
     #[test]
     fn open_task_detail_opens_when_task_selected() {
         let mut app = app_with_task(Status::Queued);
-        assert!(!app.detail_open);
+        assert!(app.detail.is_none());
         app.open_task_detail();
-        assert!(app.detail_open);
+        assert!(app.detail.is_some());
     }
 
     #[test]
     fn open_task_detail_noop_when_column_empty() {
         let mut app = minimal_app();
         app.open_task_detail();
-        assert!(!app.detail_open);
+        assert!(app.detail.is_none());
     }
 
     #[test]
     fn close_task_detail_closes() {
         let mut app = app_with_task(Status::Queued);
         app.open_task_detail();
-        assert!(app.detail_open);
+        assert!(app.detail.is_some());
         app.close_task_detail();
-        assert!(!app.detail_open);
+        assert!(app.detail.is_none());
     }
 }

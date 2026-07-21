@@ -38,7 +38,7 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
                 }
                 if app.help_open {
                     handle_help_key(app, key.code);
-                } else if app.detail_open {
+                } else if app.detail.is_some() {
                     handle_detail_key(app, key.code);
                 } else if app.input.active {
                     handle_input_key(app, key.code);

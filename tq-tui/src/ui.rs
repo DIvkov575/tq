@@ -33,7 +33,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if app.help_open {
         draw_help_overlay(frame);
-    } else if app.detail_open {
+    } else if app.detail.is_some() {
         draw_task_detail(frame, app);
     } else if app.input.active {
         draw_input_modal(frame, app);
@@ -102,7 +102,7 @@ fn contextual_help(app: &App) -> String {
     if app.input.active {
         return "Enter submit  Esc cancel".to_string();
     }
-    if app.detail_open {
+    if app.detail.is_some() {
         return "Enter/Esc to close".to_string();
     }
 
@@ -199,15 +199,15 @@ fn draw_help_overlay(frame: &mut Frame) {
 }
 
 fn draw_task_detail(frame: &mut Frame, app: &App) {
-    let Some(task) = app.selected_task() else {
+    let Some(detail) = &app.detail else {
         return;
     };
 
-    let mut body = task.title.clone();
-    if !task.notes.is_empty() {
+    let mut body = detail.title.clone();
+    if !detail.notes.is_empty() {
         body.push_str("\n\n");
         body.push_str("notes: ");
-        body.push_str(&task.notes);
+        body.push_str(&detail.notes);
     }
     body.push_str("\n\nEnter or Esc to close");
 
@@ -219,21 +219,15 @@ fn draw_task_detail(frame: &mut Frame, app: &App) {
     let area = centered_rect(MODAL_WIDTH_PCT, height, frame.area());
     frame.render_widget(Clear, area);
 
-    let title = format!(" {} task ", column_label(task.status));
+    let title = format!(" {} task ", column_label(detail.status));
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let total_lines = Paragraph::new(body.as_str())
-        .wrap(Wrap { trim: false })
-        .line_count(inner_width) as u16;
-    let scroll_y = total_lines.saturating_sub(height);
-
     let paragraph = Paragraph::new(body)
         .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll((scroll_y, 0));
+        .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, area);
 }
 
@@ -305,7 +299,7 @@ mod tests {
             input: InputState::default(),
             pending_project_name: String::new(),
             help_open: false,
-            detail_open: false,
+            detail: None,
             should_quit: false,
         }
     }
@@ -480,7 +474,7 @@ mod tests {
         let mut task = Task::new("a very specific task title", "some helpful notes");
         task.status = Status::Queued;
         let mut app = test_app(vec![task], 0);
-        app.detail_open = true;
+        app.open_task_detail();
         terminal.draw(|f| draw(f, &app)).unwrap();
         let buffer = terminal.backend().buffer();
         let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
@@ -494,7 +488,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let task = Task::new("bare title", "");
         let mut app = test_app(vec![task], 0);
-        app.detail_open = true;
+        app.open_task_detail();
         terminal.draw(|f| draw(f, &app)).unwrap();
         let buffer = terminal.backend().buffer();
         let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
