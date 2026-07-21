@@ -154,13 +154,17 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 /// Max modal height in text lines, so a very long pasted title can't fill the screen.
 const MAX_INPUT_MODAL_LINES: u16 = 8;
 
+/// Number of wrapped lines `text` occupies at `width` columns, with no cap applied.
+fn wrapped_line_count(text: &str, width: u16) -> u16 {
+    Paragraph::new(text)
+        .wrap(Wrap { trim: false })
+        .line_count(width) as u16
+}
+
 /// Number of wrapped lines `text` occupies at `width` columns, clamped to
 /// `[1, MAX_INPUT_MODAL_LINES]`.
 fn modal_height_for(text: &str, width: u16) -> u16 {
-    let lines = Paragraph::new(text)
-        .wrap(Wrap { trim: false })
-        .line_count(width) as u16;
-    lines.clamp(1, MAX_INPUT_MODAL_LINES)
+    wrapped_line_count(text, width).clamp(1, MAX_INPUT_MODAL_LINES)
 }
 
 fn help_overlay_text() -> String {
@@ -207,19 +211,41 @@ fn draw_task_detail(frame: &mut Frame, app: &App) {
         return;
     };
 
-    let mut body = detail.title.clone();
-    if !detail.notes.is_empty() {
-        body.push_str("\n\n");
-        body.push_str("notes: ");
-        body.push_str(&detail.notes);
-    }
-    body.push_str("\n\nEnter or Esc to close");
-
     const MODAL_WIDTH_PCT: u16 = 60;
     let probe = centered_rect(MODAL_WIDTH_PCT, 1, frame.area());
-    let inner_width = probe.width.saturating_sub(2);
+    let inner_width = probe.width.saturating_sub(2).max(1);
 
-    let height = modal_height_for(&body, inner_width);
+    // Detail is read-only (no cursor to keep on-screen), so it can use a much
+    // taller cap than the input modal — bounded by the terminal's own height
+    // rather than a small fixed constant.
+    let max_lines = frame.area().height.saturating_sub(6).clamp(3, 30);
+
+    let mut body = detail.title.clone();
+    if !detail.notes.is_empty() {
+        let mut notes = detail.notes.clone();
+        // Rough character budget for the notes portion so a truncation
+        // marker stays within the visible area for very long notes, instead
+        // of silently scrolling off with no indication (the exact word-wrap
+        // point isn't simulated here, so this is an approximation).
+        let title_lines = wrapped_line_count(&detail.title, inner_width);
+        let budget_lines = max_lines.saturating_sub(title_lines).saturating_sub(2);
+        let budget_chars = (budget_lines as usize).saturating_mul(inner_width as usize);
+        const MARKER: &str = " … (truncated)";
+        if budget_chars > 0 && notes.chars().count() > budget_chars {
+            // Reserve room for the marker itself within the budget so
+            // appending it can't push the total back over budget_chars —
+            // otherwise the marker meant to signal truncation could itself
+            // be the part that gets clipped off.
+            let take = budget_chars.saturating_sub(MARKER.chars().count());
+            let mut truncated: String = notes.chars().take(take).collect();
+            truncated.push_str(MARKER);
+            notes = truncated;
+        }
+        body.push_str("\n\nnotes: ");
+        body.push_str(&notes);
+    }
+
+    let height = wrapped_line_count(&body, inner_width).clamp(1, max_lines);
     let area = centered_rect(MODAL_WIDTH_PCT, height, frame.area());
     frame.render_widget(Clear, area);
 
@@ -543,5 +569,32 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
         assert!(!rendered.contains("notes:"), "expected no notes line for empty notes, got: {rendered}");
+    }
+
+    #[test]
+    fn draw_task_detail_truncates_very_long_notes_with_marker() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let long_notes = "n".repeat(5000);
+        let mut task = Task::new("short title", long_notes);
+        task.status = Status::Queued;
+        let mut app = test_app(vec![task], 0);
+        app.open_task_detail();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(rendered.contains("short title"), "expected title to remain visible, got: {rendered}");
+        assert!(rendered.contains("truncated"), "expected a truncation marker to be visible, got: {rendered}");
+    }
+
+    #[test]
+    fn draw_task_detail_does_not_panic_at_tiny_terminal() {
+        let backend = TestBackend::new(10, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut task = Task::new("a title", "some notes here that are moderately long for the test");
+        task.status = Status::Queued;
+        let mut app = test_app(vec![task], 0);
+        app.open_task_detail();
+        terminal.draw(|f| draw(f, &app)).unwrap();
     }
 }
